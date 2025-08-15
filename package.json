@@ -1,0 +1,51 @@
+{
+  "name": "ankitseal-dashboard-auto-reload",
+  "version": "1.3.0",
+  "description": "Electron app to load a dashboard URL with a pre-set SESSION cookie, keep-alive pings, and periodic reload.",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron .",
+    "postinstall": "electron --version > NUL 2>&1 || exit 0",
+    "dist": "electron-builder --win",
+    "dist:portable": "electron-builder --win portable",
+    "dist:dir": "electron-builder --dir"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^31.3.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.ankitseal.dashboard-auto-reload",
+    "productName": "Dashboard Auto Reload",
+    "asar": true,
+    "asarUnpack": [],
+    "files": [
+      "src/**/*",
+      "config.json",
+      "icon.ico",
+      "!dist/**",
+      "!out/**",
+      "!build/**",
+      "!**/*.map"
+    ],
+    "extraResources": [
+      "config.json",
+      "icon.ico"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "icon.ico",
+      "signAndEditExecutable": false
+    }
+  }
+}

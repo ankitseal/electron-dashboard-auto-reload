@@ -1,0 +1,350 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Settings</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
+    fieldset { margin-bottom: 16px; }
+    label { display: block; margin: 6px 0 2px; font-weight: 600; }
+  input[type=text], input[type=password], input[type=number], select { width: 100%; padding: 8px; box-sizing: border-box; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .actions { display: flex; gap: 8px; justify-content: flex-end; }
+    button { padding: 8px 12px; }
+  .status { margin-top: 8px; height: 1.2em; color: #0a0; }
+  .status.error { color: #a00; }
+  .toggle { display: inline-flex; align-items: center; gap: 8px; }
+  .pwd { display:flex; gap:6px; align-items:center; }
+  .help { font-weight: normal; color: #666; cursor: help; display:inline-block; margin-left:6px; border:1px solid #ccc; border-radius:50%; width:18px; height:18px; line-height:16px; text-align:center; font-size:12px; }
+  </style>
+</head>
+<body>
+  <h2>Settings</h2>
+  <form id="cfg">
+    <fieldset>
+      <legend>Target</legend>
+      <label>URL</label>
+      <input id="url" type="text" placeholder="https://..." />
+      <label>SESSION</label>
+      <input id="session" type="text" placeholder="optional" />
+    </fieldset>
+
+    <fieldset>
+      <legend>Login</legend>
+      <div class="row">
+        <div>
+          <label>Email</label>
+          <input id="email" type="text" />
+        </div>
+        <div>
+          <label>Password</label>
+          <div class="pwd">
+            <input id="password" type="password" />
+            <button type="button" id="togglePwd" title="Show/Hide">👁️</button>
+          </div>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Page Behavior</legend>
+      <div class="row">
+        <div>
+          <label>
+            Keep Alive (sec)
+            <span class="help" title="Sends periodic HEAD requests to keep sessions alive. 0 disables.">?</span>
+          </label>
+          <input id="keepAliveSec" type="number" min="0" step="1" />
+        </div>
+        <div>
+          <label>
+            Wait For CSS (optional)
+            <span class="help" title="Wait until a CSS selector appears before starting the reload timer.">?</span>
+          </label>
+          <input id="waitForCss" type="text" placeholder="#selector" />
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Auto Refresh</legend>
+      <div class="row">
+        <div>
+          <label>
+            Reload After (sec)
+            <span class="help" title="Time between automatic page reloads. Use 250 seconds by default.">?</span>
+          </label>
+          <input id="reloadAfterSec" type="number" min="1" step="1" />
+        </div>
+        <div>
+          <label class="toggle" style="margin-top: 28px;">
+            <input id="autoReloadEnabled" type="checkbox" />
+            Auto Refresh Enabled
+            <span class="help" title="Turn on periodic page reloads using the interval on the left.">?</span>
+          </label>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Rolling Window</legend>
+      <div>
+        <label>
+          <input id="twEnabled" type="checkbox" />
+          Enable rolling window
+          <span class="help" title="Append from/to timestamps for a daily rolling window starting at the chosen time.">?</span>
+        </label>
+      </div>
+      <div>
+        <label>
+          Daily start (HH:MM)
+          <span class="help" title="Local time to start each daily window. Disabled if rolling window is off.">?</span>
+        </label>
+        <input id="twStart" type="text" placeholder="12:00" />
+      </div>
+      <div>
+        <label>
+          Duration
+          <span class="help" title="Length of each rolling window.">?</span>
+        </label>
+        <select id="twDuration">
+          <option value="1h">1h</option>
+          <option value="2h">2h</option>
+          <option value="6h">6h</option>
+          <option value="12h">12h</option>
+          <option value="1d">1d</option>
+          <option value="2d">2d</option>
+          <option value="5d">5d</option>
+          <option value="7d">7d</option>
+        </select>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Navigation</legend>
+      <div>
+        <label>
+          <input id="navigateBackEnabled" type="checkbox" />
+          Navigate back to default URL
+          <span class="help" title="If the page navigates away, return to the configured URL. Requires a positive child tab timeout.">?</span>
+        </label>
+      </div>
+      <div>
+        <label>
+          Close child tabs after (sec)
+          <span class="help" title="Automatically close new windows/tabs after this many seconds. Use 250 seconds by default.">?</span>
+        </label>
+        <input id="tabTimeoutSec" type="number" min="0" step="1" placeholder="0 = never" />
+      </div>
+    </fieldset>
+
+    <div style="margin-top:12px;">
+      <label>Preview URL</label>
+      <div id="preview" style="font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; word-break: break-all; background:#f6f8fa; border:1px solid #e1e4e8; padding:8px; border-radius:4px;">—</div>
+    </div>
+    <div class="actions" style="margin-top:12px;">
+      <button type="submit">Save</button>
+    </div>
+    <div id="status" class="status"></div>
+  </form>
+  <script>
+    const api = window.Settings;
+  function val(id){ return document.getElementById(id).value; }
+    function setVal(id,v){ document.getElementById(id).value = v ?? ''; }
+    function setChk(id,v){ document.getElementById(id).checked = !!v; }
+
+    async function load(){
+      const cfg = await api.getConfig();
+      setVal('url', cfg.url);
+      setVal('session', cfg.session);
+      setVal('email', cfg.user?.email);
+      setVal('password', cfg.user?.password);
+  setVal('keepAliveSec', cfg.keepAliveSec);
+  setVal('reloadAfterSec', cfg.reloadAfterSec);
+  setVal('waitForCss', cfg.waitForCss);
+  setChk('twEnabled', cfg.timeWindow?.enabled);
+  // Default twStart to 12:00 when enabled but missing
+  const startVal = (cfg.timeWindow?.enabled && (!cfg.timeWindow?.start || !String(cfg.timeWindow.start).trim())) ? '12:00' : cfg.timeWindow?.start;
+  setVal('twStart', startVal);
+    // Set duration dropdown
+    const _twDurationEl = document.getElementById('twDuration');
+    if (_twDurationEl) { _twDurationEl.value = (cfg.timeWindow?.duration || '1d'); }
+  setChk('autoReloadEnabled', !!cfg.autoReloadEnabled);
+  updateReloadInputs();
+  setChk('navigateBackEnabled', !!cfg.navigateBackEnabled);
+  // Default tab timeout to 250 when enabled but invalid/missing
+  let tabTo = Number.isFinite(cfg.tabTimeoutSec) ? cfg.tabTimeoutSec : NaN;
+  if (!!cfg.navigateBackEnabled && (!Number.isFinite(tabTo) || tabTo <= 0)) tabTo = 250;
+  setVal('tabTimeoutSec', Number.isFinite(tabTo) ? tabTo : 0);
+  updateTwInputs();
+    }
+
+    document.getElementById('cfg').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const toggleOn = document.getElementById('autoReloadEnabled').checked;
+      let ra = Number(val('reloadAfterSec'));
+      if (toggleOn && (!Number.isFinite(ra) || ra <= 0)) {
+        ra = 250; // default when enabling
+        setVal('reloadAfterSec', ra);
+      }
+      if (!toggleOn) {
+        ra = 0; // force off when disabled
+      }
+
+  // Normalize rolling window start and tab timeout defaults per request
+  const twOn = document.getElementById('twEnabled').checked;
+  let twStart = val('twStart');
+  if (twOn && (!twStart || !String(twStart).trim())) twStart = '12:00';
+
+  const navBackOn = document.getElementById('navigateBackEnabled').checked;
+  let tabTimeout = Number(document.getElementById('tabTimeoutSec').value||0);
+  if (navBackOn && (!Number.isFinite(tabTimeout) || tabTimeout <= 0)) tabTimeout = 250;
+
+  const payload = {
+        url: val('url'),
+        session: val('session'),
+        keepAliveSec: Number(val('keepAliveSec')||0),
+        reloadAfterSec: ra,
+        waitForCss: val('waitForCss') || null,
+        user: { email: val('email'), password: val('password') },
+    timeWindow: { enabled: twOn, start: twStart || '12:00', duration: (document.getElementById('twDuration') ? document.getElementById('twDuration').value : '1d') },
+  autoReloadEnabled: toggleOn,
+  navigateBackEnabled: navBackOn,
+  tabTimeoutSec: tabTimeout
+      };
+      const res = await api.saveConfig(payload);
+      const st = document.getElementById('status');
+      if (res.ok) { st.textContent = 'Saved'; st.classList.remove('error'); }
+      else { st.textContent = 'Error: '+res.error; st.classList.add('error'); }
+      setTimeout(() => { st.textContent = ''; st.classList.remove('error'); }, 2500);
+    });
+
+    function updateReloadInputs() {
+      const on = document.getElementById('autoReloadEnabled').checked;
+      const ra = document.getElementById('reloadAfterSec');
+      ra.disabled = !on;
+      ra.min = on ? '1' : '0';
+    }
+
+    document.getElementById('autoReloadEnabled').addEventListener('change', () => {
+      updateReloadInputs();
+      const on = document.getElementById('autoReloadEnabled').checked;
+      let v = Number(val('reloadAfterSec'));
+      if (on && (!Number.isFinite(v) || v <= 0)) setVal('reloadAfterSec', 250);
+      if (!on) setVal('reloadAfterSec', 0);
+    });
+
+    document.getElementById('togglePwd').addEventListener('click', () => {
+      const p = document.getElementById('password');
+      p.type = p.type === 'password' ? 'text' : 'password';
+    });
+
+    // Rolling window inputs
+    function updateTwInputs() {
+      const on = document.getElementById('twEnabled').checked;
+      const input = document.getElementById('twStart');
+      const dur = document.getElementById('twDuration');
+      input.disabled = !on;
+      if (dur) dur.disabled = !on;
+      if (on) {
+        const cur = String(input.value||'').trim();
+        if (!cur) input.value = '12:00';
+      }
+      updatePreview();
+    }
+    document.getElementById('twEnabled').addEventListener('change', updateTwInputs);
+
+    // Link tab timeout to navigate-back; 0 disables navigate back
+    function updateNavBackInputs() {
+      const chk = document.getElementById('navigateBackEnabled');
+      const input = document.getElementById('tabTimeoutSec');
+      if (!chk.checked) {
+        input.disabled = true;
+        input.min = '0';
+        input.value = '0';
+      } else {
+        input.disabled = false;
+        input.min = '1';
+        const v = Number(input.value || 0);
+        if (!Number.isFinite(v) || v <= 0) {
+          input.value = '250'; // default like Reload After
+        }
+      }
+    }
+    function onTimeoutInput() {
+      const input = document.getElementById('tabTimeoutSec');
+      const chk = document.getElementById('navigateBackEnabled');
+      const to = Number(input.value || 0);
+      if (!Number.isFinite(to) || to <= 0) {
+        chk.checked = false;
+        updateNavBackInputs();
+      }
+    }
+    document.getElementById('tabTimeoutSec').addEventListener('input', onTimeoutInput);
+    document.getElementById('navigateBackEnabled').addEventListener('change', updateNavBackInputs);
+
+    // Build a live preview of the effective URL with from/to parameters
+    function pad(n){ return String(n).padStart(2,'0'); }
+    function normalizeUrl(u){
+      if (!u) return '';
+      const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(u);
+      return hasScheme ? u : ('https://' + u);
+    }
+    function durationToMs(label){
+      const map = { '1h':3600000,'2h':7200000,'6h':21600000,'12h':43200000,'1d':86400000,'2d':172800000,'5d':432000000,'7d':604800000 };
+      if (map[label]) return map[label];
+      const h = parseInt(String(label||'').replace(/[^0-9]/g,''),10);
+      return Number.isFinite(h) && h>0 ? h*3600000 : 86400000;
+    }
+    function computeWindowPreview(startHM, durationLabel){
+      const parts = String(startHM||'12:00').split(':');
+      const sh = Math.max(0, Math.min(23, parseInt(parts[0]||'12',10)||0));
+      const sm = Math.max(0, Math.min(59, parseInt(parts[1]||'0',10)||0));
+      const now = new Date();
+      const durMs = durationToMs(durationLabel||'1d');
+      const dayMs = 86400000;
+      let from = new Date(now.getFullYear(), now.getMonth(), now.getDate(), sh, sm, 0, 0);
+      if (now < from) from = new Date(from.getTime() - dayMs);
+      let to = new Date(from.getTime() + durMs);
+      while (now >= to) { from = new Date(from.getTime() + dayMs); to = new Date(from.getTime() + durMs); }
+      return { from: from.getTime(), to: to.getTime() };
+    }
+    function withWindowParams(baseUrl, win){
+      try{
+        const u = new URL(normalizeUrl(baseUrl));
+        u.searchParams.set('from', String(win.from));
+        u.searchParams.set('to', String(win.to));
+        return u.toString();
+      }catch{ return normalizeUrl(baseUrl); }
+    }
+    function updatePreview(){
+      const el = document.getElementById('preview');
+      const base = val('url');
+      const on = document.getElementById('twEnabled').checked;
+      if (!base) { el.textContent = 'Enter a URL to preview'; return; }
+      if (!on) { el.textContent = normalizeUrl(base); return; }
+      const start = val('twStart') || '12:00';
+      const dur = document.getElementById('twDuration') ? document.getElementById('twDuration').value : '1d';
+      const win = computeWindowPreview(start, dur);
+      el.textContent = withWindowParams(base, win);
+    }
+    // Hook preview updates
+    document.getElementById('url').addEventListener('input', updatePreview);
+    document.getElementById('twEnabled').addEventListener('change', updatePreview);
+    document.getElementById('twStart').addEventListener('input', updatePreview);
+    const _durEl = document.getElementById('twDuration');
+    if (_durEl) _durEl.addEventListener('change', updatePreview);
+
+    // Call after load to set initial state
+    const _origLoad = load;
+    load = async function() {
+      await _origLoad();
+      updateNavBackInputs();
+    };
+
+  load().then(() => updatePreview());
+  </script>
+</body>
+</html>

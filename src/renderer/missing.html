@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Settings Required</title>
+  <style>
+    :root{ --bg:#0f172a; --panel:#111827; --muted:#94a3b8; --text:#e5e7eb; --accent:#22c55e; --border:#1f2937; }
+    html,body{ height:100%; margin:0; }
+    body{ display:flex; align-items:center; justify-content:center; color:var(--text); background: radial-gradient(1000px 500px at 10% -20%, #1f2937, transparent), var(--bg); font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    .wrap{ text-align:center; padding:28px 22px; border:1px solid var(--border); background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0)), var(--panel); border-radius:16px; box-shadow: 0 20px 50px rgba(0,0,0,.45); max-width:720px; }
+    h1{ margin:8px 0 10px; font-size: 28px; }
+    p{ margin:8px 0 18px; color: var(--muted); font-size: 16px; }
+    .actions{ display:flex; justify-content:center; gap:12px; }
+    button{ padding:12px 16px; border-radius:12px; border:1px solid #16a34a; color:#052e14; background: linear-gradient(180deg, rgba(34,197,94,0.9), rgba(34,197,94,0.75)); font-weight:700; cursor:pointer; }
+    kbd{ background:#0b1220; border:1px solid var(--border); border-bottom-color:#0b1220; padding:2px 6px; border-radius:6px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color:#cbd5e1; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Settings are missing</h1>
+    <p>Please configure a target URL to start the dashboard. You can open Settings from the menu or the button below.</p>
+    <div class="actions">
+      <button id="open">Open Settings</button>
+    </div>
+    <p style="margin-top:16px;color:#9ca3af">Tip: press <kbd>Ctrl</kbd> + <kbd>/</kbd> to open Settings anytime.</p>
+  </div>
+  <script>
+    document.getElementById('open').addEventListener('click', () => {
+      try { window.App?.openSettings(); } catch {}
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,20 @@
+{
+  "url": "",
+  "session": "",
+  "keepAliveSec": 300,
+  "reloadAfterSec": 250,
+  "waitForCss": null,
+  "timeWindow": {
+    "enabled": true,
+  "start": "05:30",
+  "duration": "1d"
+  },
+  "autoReloadEnabled": true,
+  "navigateBackEnabled": true,
+  "tabTimeoutSec": 600,
+  "userEnc": {
+    "iv": "",
+    "tag": "",
+    "data": ""
+  }
+}
