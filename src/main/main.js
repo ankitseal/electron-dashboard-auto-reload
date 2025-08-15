@@ -227,6 +227,20 @@ async function bootstrap() {
 
   const cfg = loadConfig();
 
+  // Resolve app icon for Windows: prefer packaged resources, else project root
+  const resolveIcon = () => {
+    try {
+      const resRoot = process.resourcesPath;
+      if (resRoot) {
+        const p = path.join(resRoot, 'icon.ico');
+        if (fs.existsSync(p)) return p;
+      }
+    } catch {}
+    const devPath = path.join(__dirname, '..', '..', 'icon.ico');
+    return devPath;
+  };
+  const appIcon = resolveIcon();
+
   // Create a unique in-memory session partition (incognito-like) and set cookie before nav
   const partitionName = 'autorld_' + Date.now(); // non-persistent when missing 'persist:'
   const sess = session.fromPartition(partitionName);
@@ -240,7 +254,7 @@ async function bootstrap() {
     fullscreen: true,
     autoHideMenuBar: true,
     backgroundColor: '#000000',
-  icon: path.join(__dirname, '..', '..', 'icon.ico'),
+  icon: appIcon,
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'preload.js'),
       partition: partitionName,
@@ -378,7 +392,7 @@ async function bootstrap() {
       autoHideMenuBar: true,
       fullscreen: true,
       backgroundColor: '#000000',
-  icon: path.join(__dirname, '..', '..', 'icon.ico'),
+  icon: appIcon,
       webPreferences: {
         preload: path.join(__dirname, '..', 'preload', 'preload.js'),
         partition: partitionName,
@@ -585,7 +599,7 @@ async function bootstrap() {
       title: 'Settings',
       modal: false,
       parent: win,
-    icon: path.join(__dirname, '..', '..', 'icon.ico'),
+  icon: appIcon,
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
