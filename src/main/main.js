@@ -300,6 +300,17 @@ async function bootstrap() {
       if (desiredReload === 0) autoEnabled = false; // auto-off when interval is 0
       if (autoEnabled && (!Number.isFinite(desiredReload) || desiredReload <= 0)) desiredReload = 250; // require > 0
 
+      // Enforce: when rolling window is enabled, reload interval must be < duration
+      const nextTW = newCfg.timeWindow || cfg.timeWindow || { enabled: false, start: '05:30', duration: '1d' };
+      if (autoEnabled && nextTW.enabled) {
+        const map = { '1h':3600,'2h':7200,'6h':21600,'12h':43200,'1d':86400,'2d':172800,'5d':432000,'7d':604800 };
+        const durSec = map[nextTW.duration] ?? (() => { const h = parseInt(String(nextTW.duration||'').replace(/[^0-9]/g,''),10); return Number.isFinite(h)&&h>0 ? h*3600 : 86400; })();
+        if (Number.isFinite(desiredReload) && desiredReload >= durSec) {
+          // Coerce to dur-1 to keep timer functional while respecting constraint
+          desiredReload = Math.max(1, durSec - 1);
+        }
+      }
+
       // Determine navigate-back and tab timeout linkage
       const desiredTabTimeout = Number.isFinite(newCfg.tabTimeoutSec) ? Number(newCfg.tabTimeoutSec) : cfg.tabTimeoutSec;
       let navBack = (newCfg.navigateBackEnabled !== undefined) ? !!newCfg.navigateBackEnabled : cfg.navigateBackEnabled;
@@ -312,7 +323,7 @@ async function bootstrap() {
         reloadAfterSec: desiredReload,
         waitForCss: newCfg.waitForCss ?? cfg.waitForCss ?? null,
         user: newCfg.user || cfg.user || { email: '', password: '' },
-        timeWindow: newCfg.timeWindow || cfg.timeWindow || { enabled: false, start: '05:30' },
+  timeWindow: nextTW,
         autoReloadEnabled: autoEnabled,
         navigateBackEnabled: navBack,
         tabTimeoutSec: Number.isFinite(desiredTabTimeout) ? desiredTabTimeout : 600

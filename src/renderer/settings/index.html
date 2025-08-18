@@ -74,7 +74,7 @@
         <div>
           <label>
             Reload After (sec)
-            <span class="help" title="Time between automatic page reloads. Use 250 seconds by default.">?</span>
+    <span class="help" title="Time between automatic page reloads. Use 250 seconds by default. When Rolling Window is enabled, this must be less than the window duration.">?</span>
           </label>
           <input id="reloadAfterSec" type="number" min="1" step="1" />
         </div>
@@ -86,6 +86,7 @@
           </label>
         </div>
       </div>
+  <div id="ruleWarn" class="status error" style="display:none; margin-top:4px;"></div>
     </fieldset>
 
     <fieldset>
@@ -226,6 +227,7 @@
       const ra = document.getElementById('reloadAfterSec');
       ra.disabled = !on;
       ra.min = on ? '1' : '0';
+  updateRule();
     }
 
     document.getElementById('autoReloadEnabled').addEventListener('change', () => {
@@ -234,6 +236,7 @@
       let v = Number(val('reloadAfterSec'));
       if (on && (!Number.isFinite(v) || v <= 0)) setVal('reloadAfterSec', 250);
       if (!on) setVal('reloadAfterSec', 0);
+  updateRule();
     });
 
     document.getElementById('togglePwd').addEventListener('click', () => {
@@ -255,6 +258,9 @@
       updatePreview();
     }
     document.getElementById('twEnabled').addEventListener('change', updateTwInputs);
+  document.getElementById('twStart').addEventListener('input', () => { updatePreview(); updateRule(); });
+  const _twDurEl = document.getElementById('twDuration');
+  if (_twDurEl) _twDurEl.addEventListener('change', () => { updatePreview(); updateRule(); });
 
     // Link tab timeout to navigate-back; 0 disables navigate back
     function updateNavBackInputs() {
@@ -333,9 +339,7 @@
     // Hook preview updates
     document.getElementById('url').addEventListener('input', updatePreview);
     document.getElementById('twEnabled').addEventListener('change', updatePreview);
-    document.getElementById('twStart').addEventListener('input', updatePreview);
-    const _durEl = document.getElementById('twDuration');
-    if (_durEl) _durEl.addEventListener('change', updatePreview);
+  document.getElementById('reloadAfterSec').addEventListener('input', () => { updateRule(); });
 
     // Call after load to set initial state
     const _origLoad = load;
@@ -344,7 +348,56 @@
       updateNavBackInputs();
     };
 
-  load().then(() => updatePreview());
+    // Validation: reloadAfter must be < rolling window duration when both enabled
+    function getDurationSec(){
+      const el = document.getElementById('twDuration');
+      const label = el ? el.value : '1d';
+      const map = { '1h':3600,'2h':7200,'6h':21600,'12h':43200,'1d':86400,'2d':172800,'5d':432000,'7d':604800 };
+      if (map[label]) return map[label];
+      const h = parseInt(String(label||'').replace(/[^0-9]/g,''),10);
+      return Number.isFinite(h) && h>0 ? h*3600 : 86400;
+    }
+    function updateRule(){
+      const warn = document.getElementById('ruleWarn');
+      const onRoll = document.getElementById('twEnabled').checked;
+      const onAuto = document.getElementById('autoReloadEnabled').checked;
+      const raEl = document.getElementById('reloadAfterSec');
+      const ra = Number(raEl.value||0);
+      const dur = getDurationSec();
+      // Set max when applicable
+      if (onRoll && onAuto) {
+        raEl.max = String(Math.max(1, dur-1));
+      } else {
+        raEl.removeAttribute('max');
+      }
+      const bad = onRoll && onAuto && Number.isFinite(ra) && ra >= dur;
+      if (bad) {
+        warn.style.display = '';
+        warn.textContent = `Reload interval (${ra}s) must be less than rolling window duration (${dur}s).`;
+        raEl.style.borderColor = '#a00';
+      } else {
+        warn.style.display = 'none';
+        warn.textContent = '';
+        raEl.style.borderColor = '';
+      }
+      return !bad;
+    }
+
+    // Override submit to enforce rule before saving
+    const _origSubmit = document.getElementById('cfg').onsubmit;
+    // rewire our existing listener: we already addEventListener('submit', ...) earlier
+    const form = document.getElementById('cfg');
+    form.addEventListener('submit', (e) => {
+      if (!updateRule()) {
+        e.preventDefault();
+        const st = document.getElementById('status');
+        st.textContent = 'Fix errors before saving.';
+        st.classList.add('error');
+        setTimeout(() => { st.textContent=''; st.classList.remove('error'); }, 2500);
+      }
+    }, true);
+
+    load().then(() => { updatePreview(); updateRule(); });
   </script>
 </body>
 </html>
