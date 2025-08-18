@@ -1,4 +1,4 @@
-# Electron Auto Reload
+# Electron Dashboard Auto Reload
 
 Electron app to display a dashboard URL with a pre-set `SESSION` cookie, optional keep-alive, and periodic auto-refresh. Includes a modern Settings UI, a first-run “missing settings” screen, and a rolling time window.
 
