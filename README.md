@@ -1,68 +1,44 @@
 # Electron Auto Reload
 
-Electron-based replacement for the Python/Selenium app. It loads the configured URL with a pre-set `SESSION` cookie, optionally keeps the session alive, and refreshes periodically.
+Electron app to display a dashboard URL with a pre-set `SESSION` cookie, optional keep-alive, and periodic auto-refresh. Includes a modern Settings UI, a first-run “missing settings” screen, and a rolling time window.
+
+## First run
+
+- If no URL is configured, the app shows a full-screen message and opens Settings automatically.
+- Behaviors requiring a URL (auto-refresh, navigate-back) are disabled until a URL is set.
 
 ## Configure
 
-Edit `config.json`:
+You can configure via Settings (recommended) or by editing `config.json`.
 
-- `url`: Full dashboard URL to load (e.g., `https://eu1.mindsphere.io/some/path`).
-- `session`: Value of the `SESSION` cookie to use.
-- `keepAliveSec`: Number of seconds between same-origin HEAD pings to keep the session active. `0` disables.
-- `reloadAfterSec`: Seconds to wait before reloading the page. Default `300`. If set to `0`, auto reload is disabled.
-- `waitForCss`: Optional CSS selector to confirm authenticated UI is ready before starting timers.
-- `user.email` and `user.password`: Optional credentials. If present and the page redirects to a login form (e.g., Microsoft/Siemens), the app attempts to auto-fill and submit.
- - `timeWindow.enabled`: Set to `true` to add `from`/`to` query params for a rolling 24h window.
- - `timeWindow.start`: Daily start time (local) in `HH:MM` (e.g., `"05:30"`). The app computes `from` at today’s start time and `to` at the next day’s start time.
+Config keys:
 
-- `autoReloadEnabled`: Boolean toggle for auto reload. When you disable via menu or Settings, `reloadAfterSec` is persisted as `0` and the input is greyed out in Settings.
-- `navigateBackEnabled`: When `true`, the app enforces returning to the configured URL if you navigate away, and participates in child tab cleanup.
-- `tabTimeoutSec`: Number of seconds before child tabs are auto-closed. `0` disables child tab cleanup and automatically disables `navigateBackEnabled`. The Settings UI greys this field out and sets it to `0` when Navigate Back is OFF; when ON, the field enforces a minimum of `1`.
+- `url` — Full dashboard URL (e.g., `https://example.com/path`).
+- `session` — Value of the `SESSION` cookie to use. The app also learns and saves it when you log in.
+- `keepAliveSec` — Seconds between same-origin HEAD pings to keep sessions alive. `0` disables.
+- `reloadAfterSec` — Seconds between reloads. Default `300`. If set to `0`, auto-refresh is off.
+- `waitForCss` — Optional CSS selector; timers start only after it appears.
+- `user.email` / `user.password` — Optional; the app attempts to auto-fill common SSO forms. Stored encrypted on save.
+- `timeWindow.enabled` — Append `from`/`to` timestamps to the URL and keep them updated.
+- `timeWindow.start` — Daily start time (local) in `HH:MM`. This is the “from” time.
+- `timeWindow.duration` — Window length, one of: `1h`, `2h`, `6h`, `12h`, `1d`, `2d`, `5d`, `7d`. The “to” time is `start + duration`.
+- `autoReloadEnabled` — Toggle for auto-refresh (UI also controls this).
+- `navigateBackEnabled` — Return to the configured URL if the page navigates away.
+- `tabTimeoutSec` — Auto-close child tabs after this many seconds. `0` disables and turns off `navigateBackEnabled`.
+
+Validation rule:
+- When Rolling Window and Auto Refresh are both enabled, `reloadAfterSec` must be less than the rolling window duration. The Settings UI prevents saving otherwise; the app also enforces this on save.
 
 ## Project structure
 
-Key files after refactor:
+- `src/main/main.js` — App lifecycle, config, menu, rolling window, session handling.
+- `src/preload/preload.js` — Keep-alive, auto-reload timer, login helpers (contextIsolation-safe).
+- `src/preload/settings-preload.js` — IPC bridge for Settings.
+- `src/renderer/settings/index.html` — Settings UI with tooltips, live URL preview, and validation.
+- `src/renderer/missing.html` — First-run screen when URL is missing.
+- `config.json` — Default config included with the app.
 
-- `src/main/main.js` — Electron main process (creates BrowserWindow, loads config, menu, watchdog)
-- `src/preload/preload.js` — Preload for the main window (login automation, keep-alive, auto-reload)
-- `src/preload/settings-preload.js` — Preload for the Settings window (IPC bridge)
-- `src/renderer/settings/index.html` — Settings UI
-- `config.json` — Runtime configuration (bundled and/or overridden in userData)
-
-## Run
-
-1. Install Node.js 18+.
-2. From this folder, install dependencies:
-
-```powershell
-npm install
-```
-
-3. Start the app:
-
-```powershell
-npm start
-```
-
-The window opens fullscreen and auto-reloads per your settings.
-
-Keyboard shortcuts:
-
-- Ctrl+/ → Open Settings
-
-### Settings and Menu behavior
-
-- Auto Refresh
-	- Toggle in Settings or menu. Enabling requires a positive `Reload After (sec)`; if missing, defaults to `250`.
-	- Disabling sets `reloadAfterSec` to `0` and greys out the field in Settings.
-- Navigate Back & Tab Timeout
-	- When Navigate Back is OFF, `Close child tabs after (sec)` is disabled and set to `0`.
-	- When Navigate Back is ON, the timeout must be at least `1` second. Setting it to `0` automatically turns Navigate Back OFF.
-	- Links that open in new tabs are opened as child windows; stale child tabs are auto-closed based on `tabTimeoutSec`, and the app returns to the default URL.
-
-## Packaging
-
-Build a portable Windows executable with electron-builder:
+## Run (dev)
 
 1) Install dependencies
 
@@ -70,34 +46,56 @@ Build a portable Windows executable with electron-builder:
 npm install
 ```
 
-2) Package for Windows (portable exe):
+2) Start the app
 
 ```powershell
-npm run dist
+npm start
 ```
 
-Artifacts will be under `dist/`. You can also run:
+Keyboard shortcut: Ctrl+/ → Open Settings.
+
+Note on icons (dev vs packaged): in dev, Windows taskbar shows the default Electron icon; your custom icon appears after packaging.
+
+## Settings behavior
+
+- Auto Refresh
+	- Toggle on/off. If enabled with a non-positive value, defaults to `250` seconds.
+	- Disabled state sets the field to `0`.
+- Rolling Window
+	- “Daily start” sets the from time; “Duration” sets the to time.
+	- The app auto-updates the URL’s `from`/`to` when the window rolls over.
+	- Live preview shows the effective URL.
+	- Rule: Reload interval must be less than the window duration.
+- Navigation
+	- When Navigate Back is OFF, the “Close child tabs after” field is disabled and set to `0`.
+	- When ON, a minimum of `1` second is enforced; setting it to `0` toggles Navigate Back OFF.
+
+## Packaging (Windows)
+
+Build with electron-builder:
 
 ```powershell
-npm run dist:portable   # explicit portable target
-npm run dist:dir        # unpacked app directory
+npm run dist           # Windows build (portable by default per config)
+npm run dist:portable  # explicit portable target
+npm run dist:dir       # unpacked app directory
 ```
 
-Notes:
-- The packaged app bundles `config.json`. On first run, you can also place an override at `%APPDATA%/Dashboard Auto Reload/config.json` (Electron userData). The app writes updated `session` there if packaged resources are read-only.
-- If you want a different target (e.g., nsis installer), we can adjust the `build.win.target` accordingly.
+Artifacts are in `dist/`.
 
-### Troubleshooting build on Windows
+Icons:
+- The Windows executable uses `icon.ico` from the project root (declared in `package.json > build.win.icon`).
+- Use a multi-size ICO including 256, 128, 64, 48, 32, 24, 16 px (256 may be PNG-compressed). An invalid ICO causes packaging warnings or fallback icons.
 
-If the build fails with a 7-Zip error about creating symbolic links ("A required privilege is not held by the client"), do one of the following and re-run `npm run dist`:
+Troubleshooting:
+- Error “invalid icon file size”: regenerate `icon.ico` with the sizes above.
+- 7-Zip symlink privilege errors: run terminal as Administrator, enable Windows Developer Mode, or build outside OneDrive/redirected folders.
 
-- Run the terminal as Administrator, or
-- Enable Windows Developer Mode: Settings > Privacy & security > For developers > Developer Mode (then restart your terminal), or
-- Move the project to a local folder outside OneDrive/redirected profiles.
+## Persistence & where config is saved
 
-## Login and CAPTCHA handling
+- The app loads defaults from the bundled `config.json`, then applies overrides from the user data path.
+- Saving in Settings writes to: `%APPDATA%/<App Name>/config.json` (e.g., `%APPDATA%/ankitseal-dashboard-auto-reload/config.json`).
+- Credentials are encrypted and saved as `userEnc`; plaintext `user` is not persisted.
 
-If redirected to a login page, the app attempts to fill email and password (when configured). Some providers present a CAPTCHA challenge:
+## Login & CAPTCHA
 
-- The app waits for common CAPTCHA widgets to be solved (Cloudflare Turnstile, Google reCAPTCHA, and Auth0/ULP variants).
-- If a visible “Verify you are human” checkbox appears, the app attempts to click it automatically; otherwise, complete the challenge manually. Once solved, the app continues the login flow and re-submits if needed.
+When redirected to SSO, the app attempts to fill email/password and proceeds after common CAPTCHA challenges (e.g., Turnstile, reCAPTCHA). Manual interaction may still be required depending on the provider.
