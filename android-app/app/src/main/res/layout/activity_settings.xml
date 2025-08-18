@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView android:text="URL" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <EditText android:id="@+id/et_url" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textUri"/>
+
+        <TextView android:text="SESSION" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <EditText android:id="@+id/et_session" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+
+        <TextView android:text="Email" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <EditText android:id="@+id/et_email" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textEmailAddress"/>
+
+        <TextView android:text="Password" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <EditText android:id="@+id/et_password" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textPassword"/>
+
+        <TextView android:text="Keep Alive (sec)" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <EditText android:id="@+id/et_keepalive" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number"/>
+
+        <TextView android:text="Reload After (sec)" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <EditText android:id="@+id/et_reload" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number"/>
+
+        <TextView android:text="Wait For CSS" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <EditText android:id="@+id/et_waitcss" android:layout_width="match_parent" android:layout_height="wrap_content" />
+
+        <CheckBox android:id="@+id/cb_auto" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Auto Refresh Enabled"/>
+
+        <TextView android:text="Rolling Start (HH:MM)" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <EditText android:id="@+id/et_twstart" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="12:00" />
+
+        <TextView android:text="Rolling Duration" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <EditText android:id="@+id/et_twdur" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="1d" />
+
+        <CheckBox android:id="@+id/cb_twenabled" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Enable rolling window"/>
+
+        <CheckBox android:id="@+id/cb_navback" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Navigate back to default URL"/>
+
+        <TextView android:text="Close child tabs after (sec)" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+        <EditText android:id="@+id/et_tabto" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number"/>
+
+        <Button android:id="@+id/btn_save" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Save"/>
+    </LinearLayout>
+</ScrollView>
