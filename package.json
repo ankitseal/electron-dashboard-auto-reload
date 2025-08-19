@@ -1,51 +1,50 @@
 {
   "name": "ankitseal-dashboard-auto-reload",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Electron app to load a dashboard URL with a pre-set SESSION cookie, keep-alive pings, and periodic reload.",
   "main": "src/main/main.js",
   "scripts": {
-    "start": "electron .",
-    "postinstall": "electron --version > NUL 2>&1 || exit 0",
-    "dist": "electron-builder --win",
-    "dist:portable": "electron-builder --win portable",
-    "dist:dir": "electron-builder --dir"
+    "start": "electron-forge start",
+    "make": "electron-forge make",
+    "package": "electron-forge package",
+    "publish": "electron-forge publish",
+    "postinstall": "electron --version > NUL 2>&1 || exit 0"
   },
   "author": "",
   "license": "MIT",
   "devDependencies": {
     "electron": "^31.3.0",
-    "electron-builder": "^24.13.3"
+    "@electron-forge/cli": "^7.5.0",
+    "@electron-forge/maker-squirrel": "^7.5.0",
+    "@electron-forge/maker-zip": "^7.5.0"
   },
-  "build": {
-    "appId": "com.ankitseal.dashboard-auto-reload",
-    "productName": "Dashboard Auto Reload",
-    "asar": true,
-    "asarUnpack": [],
-    "files": [
-      "src/**/*",
-      "config.json",
-      "icon.ico",
-      "!dist/**",
-      "!out/**",
-      "!build/**",
-      "!**/*.map"
-    ],
-    "extraResources": [
-      "config.json",
-      "icon.ico"
-    ],
-    "directories": {
-      "output": "dist"
-    },
-    "win": {
-      "target": [
+  "config": {
+    "forge": {
+      "packagerConfig": {
+  "asar": false,
+  "prune": false,
+  "tmpdir": "C:/electron-pack-tmp",
+  "out": "C:/electron-out",
+  "overwrite": true,
+        "files": [
+          "src/**",
+          "package.json"
+        ],
+        "icon": "image/icon",
+        "extraResource": [
+          "image/icon.ico",
+          "config.json"
+        ],
+        "ignore": [
+          "^(?!/(src/|package\\.json$|image/icon\\.ico$|config\\.json$)).*"
+        ]
+      },
+      "makers": [
         {
-          "target": "portable",
-          "arch": ["x64"]
+          "name": "@electron-forge/maker-zip",
+          "platforms": ["win32", "linux"]
         }
-      ],
-      "icon": "icon.ico",
-      "signAndEditExecutable": false
+      ]
     }
   }
 }

@@ -300,17 +300,24 @@ async function bootstrap() {
     return code;
   }
 
-  // Resolve app icon for Windows: prefer packaged resources, else project root
+  // Resolve app icon (moved to /image/icon.ico). Prefer packaged resources, then dev path.
   const resolveIcon = () => {
     try {
       const resRoot = process.resourcesPath;
       if (resRoot) {
-        const p = path.join(resRoot, 'icon.ico');
-        if (fs.existsSync(p)) return p;
+        // New location inside resources/image
+        const pImg = path.join(resRoot, 'image', 'icon.ico');
+        if (fs.existsSync(pImg)) return pImg;
+        // Backward-compat fallback if icon was copied to resources root
+        const pRoot = path.join(resRoot, 'icon.ico');
+        if (fs.existsSync(pRoot)) return pRoot;
       }
     } catch {}
-    const devPath = path.join(__dirname, '..', '..', 'icon.ico');
-    return devPath;
+    // Dev fallback to repo /image folder, then legacy root
+    const devImg = path.join(__dirname, '..', '..', 'image', 'icon.ico');
+    if (fs.existsSync(devImg)) return devImg;
+    const devRoot = path.join(__dirname, '..', '..', 'icon.ico');
+    return devRoot;
   };
   const appIcon = resolveIcon();
 
