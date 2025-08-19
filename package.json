@@ -6,26 +6,61 @@
   "scripts": {
     "start": "electron-forge start",
     "make": "electron-forge make",
+  "make:portable": "electron-forge make --platform=win32 --arch=x64",
     "package": "electron-forge package",
-    "publish": "electron-forge publish",
+  "publish": "electron-forge publish",
+  "dist": "electron-builder --win portable",
+  "dist:portable": "electron-builder --win portable --x64",
+  "dist:dir": "electron-builder --dir --win",
     "postinstall": "electron --version > NUL 2>&1 || exit 0"
   },
   "author": "",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^31.3.0",
     "@electron-forge/cli": "^7.5.0",
     "@electron-forge/maker-squirrel": "^7.5.0",
-    "@electron-forge/maker-zip": "^7.5.0"
+    "@electron-forge/maker-zip": "^7.5.0",
+    "electron": "^31.3.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.ankitseal.dashboardautoreload",
+    "productName": "Dashboard Auto Reload",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "image/icon.ico",
+        "to": "image/icon.ico"
+      },
+      "config.json"
+    ],
+    "asar": true,
+    "win": {
+      "icon": "image/icon.ico",
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-${arch}-portable.exe"
+    }
   },
   "config": {
     "forge": {
       "packagerConfig": {
-  "asar": true,
-  "prune": true,
-  "tmpdir": "C:/electron-pack-tmp",
-  "out": "C:/electron-out",
-  "overwrite": true,
+        "asar": true,
+        "prune": true,
+  "out": "out",
+        "overwrite": true,
         "files": [
           "src/**",
           "package.json"
@@ -47,9 +82,14 @@
       "makers": [
         {
           "name": "@electron-forge/maker-zip",
-          "platforms": ["win32"]
+          "platforms": [
+            "win32"
+          ]
         }
       ]
     }
+  },
+  "dependencies": {
+    "npm": "^11.5.2"
   }
 }

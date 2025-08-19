@@ -72,23 +72,24 @@ Note on icons (dev vs packaged): in dev, Windows taskbar shows the default Elect
 
 ## Packaging (Windows)
 
-Build with electron-builder:
+Build with electron-builder (portable EXE):
 
 ```powershell
-npm run dist           # Windows build (portable by default per config)
-npm run dist:portable  # explicit portable target
+npm install
+npm run dist           # builds Windows portable exe
+npm run dist:portable  # portable x64 explicitly
 npm run dist:dir       # unpacked app directory
 ```
 
-Artifacts are in `dist/`.
+Artifacts land in `dist/`.
 
 Icons:
-- The Windows executable uses `icon.ico` from the project root (declared in `package.json > build.win.icon`).
+- The Windows executable uses `image/icon.ico` (configured in `package.json > build.win.icon`).
 - Use a multi-size ICO including 256, 128, 64, 48, 32, 24, 16 px (256 may be PNG-compressed). An invalid ICO causes packaging warnings or fallback icons.
 
 Troubleshooting:
-- Error “invalid icon file size”: regenerate `icon.ico` with the sizes above.
-- 7-Zip symlink privilege errors: run terminal as Administrator, enable Windows Developer Mode, or build outside OneDrive/redirected folders.
+- “invalid icon file size”: regenerate `icon.ico` with the sizes above.
+- Builds failing under OneDrive paths: try a local folder (e.g., `C:\dev\electron-auto-reload`) or run PowerShell as Administrator. Developer Mode can also help.
 
 ## Persistence & where config is saved
 
