@@ -7,11 +7,13 @@
     "start": "electron-forge start",
     "make": "electron-forge make",
   "make:portable": "electron-forge make --platform=win32 --arch=x64",
+  "make:linux": "electron-forge make --platform=linux --arch=x64",
     "package": "electron-forge package",
   "publish": "electron-forge publish",
   "dist": "electron-builder --win portable",
   "dist:portable": "electron-builder --win portable --x64",
   "dist:dir": "electron-builder --dir --win",
+  "dist:linux": "electron-builder --linux AppImage --x64",
     "postinstall": "electron --version > NUL 2>&1 || exit 0"
   },
   "author": "",
@@ -52,6 +54,13 @@
         }
       ],
       "artifactName": "${productName}-${version}-${arch}-portable.exe"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility",
+      "artifactName": "${productName}-${version}-${arch}.AppImage"
     }
   },
   "config": {
@@ -83,7 +92,7 @@
         {
           "name": "@electron-forge/maker-zip",
           "platforms": [
-            "win32"
+            "win32", "linux"
           ]
         }
       ]

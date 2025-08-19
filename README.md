@@ -70,9 +70,9 @@ Note on icons (dev vs packaged): in dev, Windows taskbar shows the default Elect
 	- When Navigate Back is OFF, the “Close child tabs after” field is disabled and set to `0`.
 	- When ON, a minimum of `1` second is enforced; setting it to `0` toggles Navigate Back OFF.
 
-## Packaging (Windows)
+## Packaging (Windows/Linux)
 
-Build with electron-builder (portable EXE):
+Windows portable EXE (electron-builder):
 
 ```powershell
 npm install
@@ -90,6 +90,17 @@ Icons:
 Troubleshooting:
 - “invalid icon file size”: regenerate `icon.ico` with the sizes above.
 - Builds failing under OneDrive paths: try a local folder (e.g., `C:\dev\electron-auto-reload`) or run PowerShell as Administrator. Developer Mode can also help.
+
+Linux AppImage (electron-builder):
+
+```bash
+npm install
+npm run dist:linux    # builds AppImage into dist/
+```
+
+Notes:
+- Ensure build deps are installed (e.g., libX11, libXext, libXcursor, libXi, libXtst, libc6, libglib2.0, libgtk3 or 4 depending on Electron, etc.). On Debian/Ubuntu, use build-essential, libglib2.0-0, libnss3, libx11-6, libxkbfile1, libgtk-3-0, libasound2.
+- Make the AppImage executable: `chmod +x *.AppImage` then run it.
 
 ## Persistence & where config is saved
 
