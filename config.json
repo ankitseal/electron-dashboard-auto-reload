@@ -1,18 +1,24 @@
 {
   "url": "",
   "session": "",
-  "keepAliveSec": 300,
-  "reloadAfterSec": 250,
+  "keepAliveSec": 0,
+  "reloadAfterSec": 60,
   "waitForCss": null,
   "timeWindow": {
-  "enabled": false,
-  "start": "05:30",
-  "duration": "1d"
+    "enabled": false,
+    "start": "05:30",
+    "duration": "1d"
   },
   "autoReloadEnabled": true,
   "navigateBackEnabled": true,
-  "tabTimeoutSec": 600,
+  "tabTimeoutSec": 250,
+  "twoFAEnabled": true,
   "userEnc": {
+    "iv": "",
+    "tag": "",
+    "data": ""
+  },
+  "twoFAEnc": {
     "iv": "",
     "tag": "",
     "data": ""
