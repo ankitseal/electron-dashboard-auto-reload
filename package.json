@@ -1,6 +1,6 @@
 {
   "name": "ankitseal-dashboard-auto-reload",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Electron app to load a dashboard URL with a pre-set SESSION cookie, keep-alive pings, and periodic reload.",
   "main": "src/main/main.js",
   "scripts": {
