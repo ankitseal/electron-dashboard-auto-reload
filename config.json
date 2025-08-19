@@ -5,7 +5,7 @@
   "reloadAfterSec": 250,
   "waitForCss": null,
   "timeWindow": {
-    "enabled": true,
+  "enabled": false,
   "start": "05:30",
   "duration": "1d"
   },

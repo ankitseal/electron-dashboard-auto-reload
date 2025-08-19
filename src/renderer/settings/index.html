@@ -18,6 +18,12 @@
   .toggle { display: inline-flex; align-items: center; gap: 8px; }
   .pwd { display:flex; gap:6px; align-items:center; }
   .help { font-weight: normal; color: #666; cursor: help; display:inline-block; margin-left:6px; border:1px solid #ccc; border-radius:50%; width:18px; height:18px; line-height:16px; text-align:center; font-size:12px; }
+  .helptext { color:#555; font-size: 12px; line-height:1.4; display:block; margin-top:6px; white-space: normal; word-break: break-word; }
+  /* TOTP ring */
+  .totp-row { display:flex; align-items:center; gap:12px; }
+  #totpRing { width: 24px; height: 24px; border-radius: 50%; background: conic-gradient(#4caf50 var(--deg,0deg), #e0e0e0 0deg); transition: background 0.2s linear; border:1px solid #ddd; }
+  #twoFASetup { margin-top: 8px; }
+  #twoFARegistered { display:none; align-items:center; gap:8px; }
   </style>
 </head>
 <body>
@@ -46,6 +52,33 @@
           </div>
         </div>
       </div>
+
+      <div style="margin-top:8px;">
+        <label class="toggle">
+          <input id="twoFAEnabled" type="checkbox" />
+          Enable 2FA autofill during login
+          <span class="help" title="Auto-fill the one-time code on 2FA screens using a TOTP secret. The code updates every 30s.">?</span>
+        </label>
+      </div>
+      <div id="twoFASetup" style="display:none;">
+        <div id="twoFAInputRow">
+          <label>Secret Key (TOTP)</label>
+          <input id="twoFASecret" type="text" placeholder="JBSWY3DPEHPK3PXP or otpauth://..." />
+          <div class="helptext">Paste your secret and click Register. Stored encrypted with your login details. You can remove it anytime.</div>
+          <div style="margin-top:6px;"><button type="button" id="twoFARegister">Register</button></div>
+        </div>
+        <div id="twoFARegistered" class="totp-row">
+          <span style="color:#2e7d32; font-weight:600;">Registered</span>
+          <button type="button" id="twoFARemove">Remove Key</button>
+        </div>
+        <div id="totpPreviewWrap" style="display:none;margin-top:8px;">
+          <label>Current Code <span class="help" title="Code refreshes every 30 seconds. The circle shows time remaining.">?</span></label>
+          <div class="totp-row">
+            <div id="totpRing"></div>
+            <div id="totpPreview" style="font: 600 20px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;">—</div>
+          </div>
+        </div>
+      </div>
     </fieldset>
 
     <fieldset>
@@ -66,11 +99,7 @@
           <input id="waitForCss" type="text" placeholder="#selector" />
         </div>
       </div>
-    </fieldset>
-
-    <fieldset>
-      <legend>Auto Refresh</legend>
-      <div class="row">
+      <div class="row" style="margin-top:8px;">
         <div>
           <label>
             Reload After (sec)
@@ -157,7 +186,8 @@
     function setChk(id,v){ document.getElementById(id).checked = !!v; }
 
     async function load(){
-      const cfg = await api.getConfig();
+  const cfg = await api.getConfig();
+  const twoFA = await api.get2FAState().catch(() => ({ enabled:false, hasSecret:false }));
       setVal('url', cfg.url);
       setVal('session', cfg.session);
       setVal('email', cfg.user?.email);
@@ -175,6 +205,9 @@
   setChk('autoReloadEnabled', !!cfg.autoReloadEnabled);
   updateReloadInputs();
   setChk('navigateBackEnabled', !!cfg.navigateBackEnabled);
+  // 2FA state
+  setChk('twoFAEnabled', !!twoFA.enabled);
+  await update2FAUI(twoFA);
   // Default tab timeout to 250 when enabled but invalid/missing
   let tabTo = Number.isFinite(cfg.tabTimeoutSec) ? cfg.tabTimeoutSec : NaN;
   if (!!cfg.navigateBackEnabled && (!Number.isFinite(tabTo) || tabTo <= 0)) tabTo = 250;
@@ -182,7 +215,7 @@
   updateTwInputs();
     }
 
-    document.getElementById('cfg').addEventListener('submit', async (e) => {
+  document.getElementById('cfg').addEventListener('submit', async (e) => {
       e.preventDefault();
       const toggleOn = document.getElementById('autoReloadEnabled').checked;
       let ra = Number(val('reloadAfterSec'));
@@ -215,10 +248,15 @@
   navigateBackEnabled: navBackOn,
   tabTimeoutSec: tabTimeout
       };
-      const res = await api.saveConfig(payload);
       const st = document.getElementById('status');
-      if (res.ok) { st.textContent = 'Saved'; st.classList.remove('error'); }
-      else { st.textContent = 'Error: '+res.error; st.classList.add('error'); }
+      try {
+        const res = await api.saveConfig(payload);
+        if (res && res.ok) { st.textContent = 'Saved'; st.classList.remove('error'); }
+        else { st.textContent = 'Error: ' + (res && res.error ? res.error : 'Failed to save'); st.classList.add('error'); }
+      } catch (err) {
+        st.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
+        st.classList.add('error');
+      }
       setTimeout(() => { st.textContent = ''; st.classList.remove('error'); }, 2500);
     });
 
@@ -243,6 +281,71 @@
       const p = document.getElementById('password');
       p.type = p.type === 'password' ? 'text' : 'password';
     });
+
+    // 2FA handling: toggle, secret input, live preview & ring
+    async function update2FAUI(twoFAState){
+      const on = document.getElementById('twoFAEnabled').checked;
+      const setup = document.getElementById('twoFASetup');
+      const inputRow = document.getElementById('twoFAInputRow');
+      const regRow = document.getElementById('twoFARegistered');
+      const wrap = document.getElementById('totpPreviewWrap');
+      setup.style.display = on ? '' : 'none';
+      if (!on) { wrap.style.display='none'; stopTotpTimer(); return; }
+      const hasSecret = !!(twoFAState && twoFAState.hasSecret);
+      inputRow.style.display = hasSecret ? 'none' : '';
+      regRow.style.display = hasSecret ? 'inline-flex' : 'none';
+      wrap.style.display = hasSecret ? '' : 'none';
+      if (hasSecret) startTotpTimer(true); else stopTotpTimer();
+    }
+    document.getElementById('twoFAEnabled').addEventListener('change', async () => {
+      const on = document.getElementById('twoFAEnabled').checked;
+      await api.set2FAEnabled(on).catch(()=>{});
+      const state = await api.get2FAState().catch(()=>({enabled:on, hasSecret:false}));
+      await update2FAUI(state);
+    });
+    document.getElementById('twoFARegister').addEventListener('click', async () => {
+      const sec = val('twoFASecret');
+      if (!sec) return;
+      await api.set2FASecret(sec).catch(()=>{});
+      document.getElementById('twoFASecret').value = '';
+      const state = await api.get2FAState().catch(()=>({enabled:true, hasSecret:true}));
+      await update2FAUI(state);
+    });
+    document.getElementById('twoFARemove').addEventListener('click', async () => {
+      await api.remove2FASecret().catch(()=>{});
+      const state = await api.get2FAState().catch(()=>({enabled:true, hasSecret:false}));
+      await update2FAUI(state);
+    });
+
+    let totpTimer = null;
+    function stopTotpTimer(){ if (totpTimer) { clearInterval(totpTimer); totpTimer = null; } }
+    async function startTotpTimer(force){
+      const el = document.getElementById('totpPreview');
+      const ring = document.getElementById('totpRing');
+      async function tick(){
+        try {
+          const code = await api.getTOTPCode();
+          el.textContent = code || '—';
+        } catch { el.textContent = '—'; }
+        // ring progress (countdown)
+        const step = 30;
+        const now = Math.floor(Date.now()/1000);
+        const rem = step - (now % step);
+        const deg = Math.max(0, Math.min(360, Math.round(rem/step*360)));
+        ring.style.setProperty('--deg', deg + 'deg');
+      }
+      if (!totpTimer || force) {
+        stopTotpTimer();
+        await tick();
+        totpTimer = setInterval(tick, 1000);
+      }
+    }
+
+    // Kick off initial TOTP UI
+    setTimeout(async () => {
+      const twoFA = await api.get2FAState().catch(()=>({enabled:false, hasSecret:false}));
+      await update2FAUI(twoFA);
+    }, 200);
 
     // Rolling window inputs
     function updateTwInputs() {
