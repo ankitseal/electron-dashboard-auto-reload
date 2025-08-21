@@ -3,6 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 async function applyBehaviors() {
   const cfg = await ipcRenderer.invoke('get-config');
+  // Query 2FA status lazily via IPC only when needed
 
   const waitForCss = cfg.waitForCss || null;
   const reloadAfterMs = Number.isFinite(cfg.reloadAfterSec)
@@ -33,7 +34,8 @@ async function applyBehaviors() {
     const emailSel = ['#username', 'input[name="loginfmt"]', 'input[type="email"]', 'input[name="username"]'];
     // On email step, the button might say Continue with classes like _button-login-id
     const nextSel = ['button._button-login-id', '#idSIButton9', 'input[type="submit"]', 'button[type="submit"]'];
-    const passSel = ['input[name="passwd"]', 'input[type="password"]', '#password'];
+  const passSel = ['input[name="passwd"]', 'input[type="password"]', '#password'];
+  const twoFASel = ['input#code', 'input[name="code"]', 'input[autocomplete="one-time-code"]'];
 
     function findAny(selectors) {
       for (const s of selectors) {
@@ -45,7 +47,75 @@ async function applyBehaviors() {
 
     function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 
-    async function waitForCaptcha(maxMs = 60000) {
+    // Try to tick common consent/remember checkboxes by label text or known IDs
+    function clickKnownCheckboxes() {
+      try {
+        // Azure AAD "Stay signed in" checkbox
+        const kmsi = document.getElementById('KmsiCheckboxField');
+        if (kmsi && kmsi.type === 'checkbox' && !kmsi.checked && !kmsi.disabled) {
+          kmsi.click();
+          kmsi.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        // Common remember-me checkbox names/ids
+        const preferred = document.querySelector(
+          'input[type="checkbox"][name*="remember" i], input[type="checkbox"][id*="remember" i]'
+        );
+        if (preferred && !preferred.checked && !preferred.disabled) {
+          preferred.click();
+          preferred.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        // Generic remember/consent patterns
+        const patterns = [
+          /stay\s*signed\s*in/i,
+          /keep\s*me\s*signed\s*in/i,
+          /remember\s*me/i,
+          /don'?t\s*show\s*this\s*again/i,
+          /trust\s*this\s*device/i,
+          /remember\s*this\s*device/i,
+          /i\s*agree|accept|consent/i
+        ];
+        const boxes = Array.from(document.querySelectorAll('input[type="checkbox"]'));
+        for (const box of boxes) {
+          if (box.checked || box.disabled) continue;
+          let labelText = '';
+          try {
+            if (box.id) {
+              const l = document.querySelector(`label[for="${CSS.escape(box.id)}"]`);
+              if (l) labelText = l.textContent || '';
+            }
+            if (!labelText) {
+              const l2 = box.closest('label');
+              if (l2) labelText = l2.textContent || '';
+            }
+            if (!labelText) {
+              const aria = box.getAttribute('aria-label');
+              if (aria) labelText = aria;
+            }
+          } catch {}
+          if (!labelText) continue;
+          if (patterns.some(re => re.test(labelText))) {
+            // Ensure visible-ish
+            const rect = box.getBoundingClientRect();
+            const visible = rect.width > 0 && rect.height > 0;
+            if (visible) {
+              box.click();
+              box.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+          }
+        }
+      } catch {}
+    }
+
+    // Poll for late-loading checkboxes for a short period
+    async function ensureCheckboxes(timeoutMs = 15000) {
+      const start = Date.now();
+      while (Date.now() - start < timeoutMs) {
+        try { clickKnownCheckboxes(); } catch {}
+        await sleep(500);
+      }
+    }
+
+  async function waitForCaptcha(maxMs = 60000) {
       const start = Date.now();
       // Generic wait for common CAPTCHA widgets to be solved.
       // Signals:
@@ -107,7 +177,11 @@ async function applyBehaviors() {
       // Wait for Cloudflare/Turnstile token readiness before continuing
       try { await waitForCaptcha(90000); } catch {}
   const nextBtn = findAny(nextSel);
-      if (nextBtn) nextBtn.click();
+  // Try ticking known checkboxes early if present on step 1
+  try { clickKnownCheckboxes(); } catch {}
+  if (nextBtn) nextBtn.click();
+  // After moving to next step, keep trying to tick checkboxes for a bit
+  ensureCheckboxes(12000).catch(()=>{});
     }
 
     // Wait briefly for password to appear
@@ -127,13 +201,18 @@ async function applyBehaviors() {
 
       // Find a submit button on the password page
       const nextBtn2 = findAny(['#idSIButton9', 'button[type="submit"]', 'input[type="submit"]']);
-      if (nextBtn2) nextBtn2.click();
+      // Try ticking known checkboxes prior to submitting password step
+      try { clickKnownCheckboxes(); } catch {}
+  if (nextBtn2) nextBtn2.click();
 
       // Optionally handle "Stay signed in" prompt
       setTimeout(() => {
+        try { clickKnownCheckboxes(); } catch {}
         const stayYes = document.querySelector('#idSIButton9');
         if (stayYes) try { stayYes.click(); } catch {}
       }, 1500);
+  // And keep trying for a while as that prompt can appear late
+  ensureCheckboxes(15000).catch(()=>{});
 
       // If a CAPTCHA interrupts at this stage, wait for solve then try submit again (once)
       try {
@@ -143,15 +222,45 @@ async function applyBehaviors() {
           if (submitAgain) submitAgain.click();
         }
       } catch {}
+      // After password submit, we may be prompted for 2FA; try to fill it
+      try { await handle2FA(); } catch {}
       return true;
     }
     return !!emailInput;
   }
 
+  // Autofill 2FA one-time code if 2FA is enabled and a code field is present
+  async function handle2FA() {
+    try {
+      const codeInput = (() => {
+        const sels = ['input#code', 'input[name="code"]', 'input[autocomplete="one-time-code"]'];
+        for (const s of sels) { const el = document.querySelector(s); if (el) return el; }
+        return null;
+      })();
+      if (!codeInput) return false;
+      const state = await ipcRenderer.invoke('get-2fa-state').catch(() => ({ enabled:false }));
+      if (!state || !state.enabled) return false;
+      const code = await ipcRenderer.invoke('get-totp-code').catch(() => '');
+      if (!code) return false;
+      codeInput.focus();
+      codeInput.value = '';
+      codeInput.dispatchEvent(new Event('input', { bubbles: true }));
+      codeInput.value = code;
+      codeInput.dispatchEvent(new Event('input', { bubbles: true }));
+      // Click a continue/submit button near the code field
+      const submit = document.querySelector('button[type="submit"], input[type="submit"], button[data-action-button-primary="true"]');
+      if (submit) submit.click();
+      return true;
+    } catch { return false; }
+  }
+
   // Determine if we are already on the target origin (i.e., session still valid)
   const onTargetOrigin = targetOrigin && location.origin === targetOrigin;
   if (!onTargetOrigin) {
-    try { await tryLogin(); } catch {}
+    try {
+      const did = await tryLogin();
+      if (!did) { await handle2FA().catch(()=>{}); }
+    } catch {}
   }
 
   // Optional: wait for CSS selector
@@ -177,6 +286,12 @@ async function applyBehaviors() {
   // Re-attempt login on SPA route changes too
   window.addEventListener('hashchange', () => { tryLogin().catch(()=>{}); });
   window.addEventListener('popstate', () => { tryLogin().catch(()=>{}); });
+  // Also try 2FA handler on route changes
+  window.addEventListener('hashchange', () => { handle2FA().catch(()=>{}); });
+  window.addEventListener('popstate', () => { handle2FA().catch(()=>{}); });
+  // And attempt checkbox ticking on route changes
+  window.addEventListener('hashchange', () => { try { /* non-fatal */ clickKnownCheckboxes(); } catch {} });
+  window.addEventListener('popstate', () => { try { /* non-fatal */ clickKnownCheckboxes(); } catch {} });
 
   // Keep-alive pings only when on target origin
   try { clearInterval(window.__keepAlive); } catch {}

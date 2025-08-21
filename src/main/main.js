@@ -6,6 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const urlLib = require('url');
 const crypto = require('crypto');
+const { URL } = urlLib;
 
 // Defaults (overridable by config.json)
 const DEFAULTS = {
@@ -165,7 +166,10 @@ function loadConfig() {
   navigateBackEnabled,
   tabTimeoutSec,
     waitForCss: cfg.waitForCss ?? DEFAULTS.waitForCss,
-    configPath: usedCfgPath
+  configPath: usedCfgPath,
+  // 2FA persisted state: enabled flag and encrypted secret (if present)
+  twoFAEnabled: !!cfg.twoFAEnabled,
+  twoFAEnc: cfg.twoFAEnc
   };
 }
 
@@ -227,17 +231,93 @@ async function bootstrap() {
 
   const cfg = loadConfig();
 
-  // Resolve app icon for Windows: prefer packaged resources, else project root
+  // 2FA state (enabled flag persisted; secret persisted encrypted like credentials)
+  let twoFAEnabled = !!cfg.twoFAEnabled;
+  let twoFASecret = '';
+  // If config loaded an encrypted secret, decrypt it here similar to userEnc
+  const decryptJson = (enc) => {
+    try {
+      if (!enc || !enc.data || !enc.iv || !enc.tag) return null;
+      const keyPath = path.join(app.getPath('userData'), 'key.bin');
+      const key = fs.existsSync(keyPath) ? fs.readFileSync(keyPath) : null;
+      if (!key) return null;
+      const iv = Buffer.from(enc.iv, 'base64');
+      const tag = Buffer.from(enc.tag, 'base64');
+      const data = Buffer.from(enc.data, 'base64');
+      const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+      decipher.setAuthTag(tag);
+      const out = Buffer.concat([decipher.update(data), decipher.final()]);
+      return JSON.parse(out.toString('utf8'));
+    } catch { return null; }
+  };
+  try {
+    if (cfg.twoFAEnc && typeof cfg.twoFAEnc === 'object') {
+      const dec = decryptJson(cfg.twoFAEnc);
+      if (dec && dec.secret) twoFASecret = String(dec.secret || '').trim();
+    }
+  } catch {}
+  // Extract base32 secret from raw input (accepts otpauth:// or plain base32)
+  function extractBase32Secret(input) {
+    if (!input) return '';
+    const raw = String(input).trim();
+    try {
+      if (raw.toLowerCase().startsWith('otpauth://')) {
+        const u = new URL(raw);
+        const secret = u.searchParams.get('secret') || '';
+        return secret.replace(/\s+/g, '').toUpperCase();
+      }
+    } catch {}
+    return raw.replace(/\s+/g, '').toUpperCase();
+  }
+  // Base32 decode (RFC 4648) without padding strictly needed
+  function base32ToBytes(b32) {
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    const clean = (b32 || '').toUpperCase().replace(/=+$/,'');
+    let bits = '';
+    for (const ch of clean) {
+      const idx = alphabet.indexOf(ch);
+      if (idx === -1) continue;
+      bits += idx.toString(2).padStart(5,'0');
+    }
+    const bytes = [];
+    for (let i = 0; i + 8 <= bits.length; i += 8) {
+      bytes.push(parseInt(bits.slice(i, i+8), 2));
+    }
+    return Buffer.from(bytes);
+  }
+  function generateTOTP(secretB32, timeStep = 30, digits = 6) {
+    const key = base32ToBytes(secretB32);
+    if (!key || key.length === 0) return '';
+    const counter = Math.floor(Date.now() / 1000 / timeStep);
+    const buf = Buffer.alloc(8);
+    // big-endian counter
+    buf.writeUInt32BE(Math.floor(counter / 0x100000000), 0);
+    buf.writeUInt32BE(counter >>> 0, 4);
+    const hmac = crypto.createHmac('sha1', key).update(buf).digest();
+    const offset = hmac[hmac.length - 1] & 0xf;
+    const codeInt = ((hmac[offset] & 0x7f) << 24) | ((hmac[offset + 1] & 0xff) << 16) | ((hmac[offset + 2] & 0xff) << 8) | (hmac[offset + 3] & 0xff);
+    const code = (codeInt % (10 ** digits)).toString().padStart(digits, '0');
+    return code;
+  }
+
+  // Resolve app icon (moved to /image/icon.ico). Prefer packaged resources, then dev path.
   const resolveIcon = () => {
     try {
       const resRoot = process.resourcesPath;
       if (resRoot) {
-        const p = path.join(resRoot, 'icon.ico');
-        if (fs.existsSync(p)) return p;
+        // New location inside resources/image
+        const pImg = path.join(resRoot, 'image', 'icon.ico');
+        if (fs.existsSync(pImg)) return pImg;
+        // Backward-compat fallback if icon was copied to resources root
+        const pRoot = path.join(resRoot, 'icon.ico');
+        if (fs.existsSync(pRoot)) return pRoot;
       }
     } catch {}
-    const devPath = path.join(__dirname, '..', '..', 'icon.ico');
-    return devPath;
+    // Dev fallback to repo /image folder, then legacy root
+    const devImg = path.join(__dirname, '..', '..', 'image', 'icon.ico');
+    if (fs.existsSync(devImg)) return devImg;
+    const devRoot = path.join(__dirname, '..', '..', 'icon.ico');
+    return devRoot;
   };
   const appIcon = resolveIcon();
 
@@ -283,6 +363,62 @@ async function bootstrap() {
   tabTimeoutSec: cfg.tabTimeoutSec
   }));
 
+  // 2FA IPC: manage enabled flag (persisted) and secret (memory-only)
+  ipcMain.handle('get-2fa-state', () => ({ enabled: twoFAEnabled, hasSecret: !!twoFASecret }));
+  ipcMain.handle('set-2fa-enabled', async (_e, enabled) => {
+    twoFAEnabled = !!enabled;
+    // Write only the flag into persisted config file
+    try {
+      let fileCfg = {};
+      try { fileCfg = JSON.parse(fs.readFileSync(cfg.configPath, 'utf-8')); } catch {}
+      fileCfg.twoFAEnabled = twoFAEnabled;
+      const targetPath = path.join(app.getPath('userData'), 'config.json');
+      fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+      fs.writeFileSync(targetPath, JSON.stringify(fileCfg, null, 2));
+    } catch {}
+    return { ok: true };
+  });
+  ipcMain.handle('set-2fa-secret', async (_e, secretRaw) => {
+    twoFASecret = extractBase32Secret(secretRaw || '');
+    // Persist encrypted secret alongside other settings
+    try {
+      let fileCfg = {};
+      try { fileCfg = JSON.parse(fs.readFileSync(cfg.configPath, 'utf-8')); } catch {}
+      const keyPath = path.join(app.getPath('userData'), 'key.bin');
+      let key = null;
+      try { key = fs.readFileSync(keyPath); } catch {
+        fs.mkdirSync(path.dirname(keyPath), { recursive: true });
+        key = crypto.randomBytes(32);
+        fs.writeFileSync(keyPath, key);
+      }
+      const iv = crypto.randomBytes(12);
+      const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+      const data = Buffer.concat([cipher.update(JSON.stringify({ secret: twoFASecret }), 'utf8'), cipher.final()]);
+      const tag = cipher.getAuthTag();
+      fileCfg.twoFAEnc = { iv: iv.toString('base64'), tag: tag.toString('base64'), data: data.toString('base64') };
+      const targetPath = path.join(app.getPath('userData'), 'config.json');
+      fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+      fs.writeFileSync(targetPath, JSON.stringify(fileCfg, null, 2));
+    } catch {}
+    return { ok: true };
+  });
+  ipcMain.handle('get-totp-code', async () => {
+    if (!twoFAEnabled || !twoFASecret) return '';
+    try { return generateTOTP(twoFASecret); } catch { return ''; }
+  });
+  ipcMain.handle('remove-2fa-secret', async () => {
+    twoFASecret = '';
+    try {
+      let fileCfg = {};
+      try { fileCfg = JSON.parse(fs.readFileSync(cfg.configPath, 'utf-8')); } catch {}
+      delete fileCfg.twoFAEnc;
+      const targetPath = path.join(app.getPath('userData'), 'config.json');
+      fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+      fs.writeFileSync(targetPath, JSON.stringify(fileCfg, null, 2));
+    } catch {}
+    return { ok: true };
+  });
+
   // Persist config updates and apply them
   ipcMain.handle('save-config', async (_evt, newCfg) => {
     try {
@@ -316,7 +452,7 @@ async function bootstrap() {
       let navBack = (newCfg.navigateBackEnabled !== undefined) ? !!newCfg.navigateBackEnabled : cfg.navigateBackEnabled;
       if (!Number.isFinite(desiredTabTimeout) || desiredTabTimeout <= 0) navBack = false;
 
-      const merged = {
+  const merged = {
         url: (typeof newCfg.url === 'string') ? newCfg.url : (cfg.hasUrl ? cfg.targetUrl : ''),
         session: newCfg.session || cfg.sessionVal || '',
         keepAliveSec: Number.isFinite(newCfg.keepAliveSec) ? Number(newCfg.keepAliveSec) : cfg.keepAliveSec,
@@ -326,7 +462,8 @@ async function bootstrap() {
   timeWindow: nextTW,
         autoReloadEnabled: autoEnabled,
         navigateBackEnabled: navBack,
-        tabTimeoutSec: Number.isFinite(desiredTabTimeout) ? desiredTabTimeout : 600
+        tabTimeoutSec: Number.isFinite(desiredTabTimeout) ? desiredTabTimeout : 600,
+        twoFAEnabled: twoFAEnabled
       };
 
   // Write file (ensure folder exists)
@@ -358,6 +495,26 @@ async function bootstrap() {
       } else {
         delete toWrite.user; // avoid empty structure
       }
+      // Persist 2FA secret if present
+      if (twoFASecret) {
+        try {
+          const keyPath = path.join(app.getPath('userData'), 'key.bin');
+          let key = null;
+          try { key = fs.readFileSync(keyPath); } catch {
+            fs.mkdirSync(path.dirname(keyPath), { recursive: true });
+            key = crypto.randomBytes(32);
+            fs.writeFileSync(keyPath, key);
+          }
+          const iv = crypto.randomBytes(12);
+          const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+          const data = Buffer.concat([cipher.update(JSON.stringify({ secret: twoFASecret }), 'utf8'), cipher.final()]);
+          const tag = cipher.getAuthTag();
+          toWrite.twoFAEnc = { iv: iv.toString('base64'), tag: tag.toString('base64'), data: data.toString('base64') };
+        } catch {}
+      } else {
+        // ensure no stale secret is written
+        delete toWrite.twoFAEnc;
+      }
 
       fs.mkdirSync(path.dirname(targetPath), { recursive: true });
       fs.writeFileSync(targetPath, JSON.stringify(toWrite, null, 2));
@@ -374,9 +531,11 @@ async function bootstrap() {
   cfg.autoReloadEnabled = cfg.hasUrl ? merged.autoReloadEnabled : false;
   cfg.navigateBackEnabled = cfg.hasUrl ? merged.navigateBackEnabled : false;
   cfg.tabTimeoutSec = merged.tabTimeoutSec;
+  cfg.twoFAEnabled = merged.twoFAEnabled;
 
-      // Update target base for watchdog
-      targetBase = cfg.hasUrl ? stripFromTo(cfg.targetUrl) : 'about:blank';
+  // Update target base for watchdog and reset grace timer
+  targetBase = cfg.hasUrl ? stripFromTo(cfg.targetUrl) : 'about:blank';
+  try { offTargetSince = null; } catch {}
 
       // Reload target with possibly updated rolling window
       const winRange = computeWindow(cfg.timeWindow.start);
@@ -543,21 +702,37 @@ async function bootstrap() {
   win.webContents.on('did-finish-load', persistSessionIfAvailable);
   win.webContents.on('did-navigate-in-page', persistSessionIfAvailable);
 
-  // Watchdog: every minute, ensure we're on the configured URL; if not, redirect back (if enabled)
+  // Watchdog: ensure we're on the configured URL; if not, redirect back (honor tabTimeoutSec as grace)
   let targetBase = stripFromTo(cfg.targetUrl);
+  let offTargetSince = null; // timestamp when main deviated from targetBase
   const ensureTargetUrl = () => {
     try {
       const current = win.webContents.getURL();
       if (!current) return;
       const curBase = stripFromTo(current);
 
-      // If on a different base URL (origin/path or base query), go back to the configured one (only when enabled)
+      // If on a different base URL, schedule a redirect after the grace period (tabTimeoutSec)
       if (cfg.navigateBackEnabled && curBase !== targetBase) {
-        const winRange = computeWindow(cfg.timeWindow.start);
-        const dest = withWindowParams(cfg.targetUrl, winRange);
-        console.log('[electron-auto-reload] Redirecting to target URL:', dest);
-        win.loadURL(dest).catch(() => {});
+        const now = Date.now();
+        if (!offTargetSince) {
+          offTargetSince = now;
+          return;
+        }
+        const graceMs = Math.max(0, Number(cfg.tabTimeoutSec || 0) * 1000);
+        const elapsed = now - offTargetSince;
+        if (graceMs === 0 || elapsed >= graceMs) {
+          const winRange = computeWindow(cfg.timeWindow.start);
+          const dest = withWindowParams(cfg.targetUrl, winRange);
+          console.log('[electron-auto-reload] Redirecting to target URL:', dest);
+          win.loadURL(dest).catch(() => {});
+          offTargetSince = null; // reset after redirect
+        } else {
+          // Still within grace period; do not redirect yet
+        }
         return;
+      } else {
+        // Back on target; clear any grace timer
+        if (offTargetSince) offTargetSince = null;
       }
 
       // If rolling window is enabled, ensure from/to match desired window
@@ -577,7 +752,7 @@ async function bootstrap() {
       }
     } catch {}
   };
-  const watchdogId = setInterval(ensureTargetUrl, 60 * 1000);
+  const watchdogId = setInterval(ensureTargetUrl, 5 * 1000);
   win.on('closed', () => { try { clearInterval(watchdogId); } catch {} });
 
   // Child timeout monitor: close stale child windows and refocus main to target URL
@@ -590,7 +765,13 @@ async function bootstrap() {
         const meta = childMeta.get(child);
         if (!meta) continue;
         const aliveMs = now - (child.isFocused() ? meta.lastActive : meta.createdAt);
-        if (aliveMs >= cfg.tabTimeoutSec * 1000) {
+        const thresholdMs = Number(cfg.tabTimeoutSec) * 1000;
+        if (aliveMs >= thresholdMs) {
+          try {
+            const aliveSec = Math.round(aliveMs / 1000);
+            const threshSec = Math.round(thresholdMs / 1000);
+            console.log(`[auto-reload][child] closing (alive=${aliveSec}s >= threshold=${threshSec}s)`);
+          } catch {}
           try { child.close(); } catch {}
           // Ensure main window is on the target URL
           const desired = cfg.timeWindow.enabled ? withWindowParams(cfg.targetUrl, computeWindow(cfg.timeWindow.start)) : cfg.targetUrl;
