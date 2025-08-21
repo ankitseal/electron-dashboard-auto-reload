@@ -11,18 +11,18 @@ import android.util.Log
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.SslErrorHandler
-import android.net.http.SslError
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceError
 import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.net.http.SslError
 import androidx.appcompat.app.AppCompatActivity
 import com.ankitseal.dashboardautoreload.databinding.ActivityMainBinding
 import java.net.URL
-import java.util.Timer
-import java.util.TimerTask
+import java.util.*
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
@@ -30,10 +30,35 @@ class MainActivity : AppCompatActivity() {
     private var cfg: ConfigStore.Config = ConfigStore.Config()
 
     private val mainHandler = Handler(Looper.getMainLooper())
-    private var keepAliveTimer: Timer? = null
+    private var keepAliveTimer: Timer? = null // deprecated (removed feature)
     private var reloadRunnable: Runnable? = null
     private val TAG = "DAR.MainActivity"
     private var lastGoodUrl: String? = null
+
+    private var initialUrlLogged = false
+    private var reloadCount = 0
+    // Event-driven scheduling (replaces adaptive polling loop)
+    private var scheduledRunnable: Runnable? = null
+    private var reloadFireAt: Long = 0L
+    private var autoReloadRunning = false // legacy flag (kept for compatibility)
+    private var autoReloadActive = false
+    private var lastInteractionMs: Long = 0L
+    private var lastAutoReloadResetInteractionMs: Long = 0L
+    // navigate-back state
+    private var navBackActive = false
+    // removed log bucket for navigateBack in event model
+    private var navigateBackCycle = 0
+    private var lastNavBackIntervalSec: Int = -1
+    private var lastPageUrl: String = ""
+    private var lastInteractionAt: Long = 0L
+    private var navBackDetectedAt: Long = 0L
+    private var lastJsInteractMs: Long = 0L
+    // Foreground / recovery loop control
+    private var isForeground: Boolean = false
+    private var lastRecoveryAttemptAt: Long = 0L
+    private var recoveryAttemptsWindowStart: Long = 0L
+    private var recoveryAttemptsInWindow: Int = 0
+    private var suppressedRecoveryUntil: Long = 0L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -71,11 +96,18 @@ class MainActivity : AppCompatActivity() {
 
         webView.addJavascriptInterface(object {
             @JavascriptInterface
-            fun log(msg: String) {
-                try { Log.w("DAR.JS", msg) } catch (_: Throwable) {}
+            fun log(msg: String) { try { Log.w("DAR.JS", msg) } catch (_: Throwable) {} }
+            @JavascriptInterface
+            fun interact() {
+                val now = System.currentTimeMillis()
+                if (now - lastJsInteractMs >= 800) { // debounce
+                    lastJsInteractMs = now
+                    lastInteractionMs = now
+                }
             }
         }, "Native")
 
+        val progressBar = binding.webContainer.findViewById<android.widget.ProgressBar>(R.id.page_progress)
         webView.webChromeClient = object : WebChromeClient() {
             override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean {
                 Log.w(TAG, "onCreateWindow: intercept popup; isDialog=$isDialog userGesture=$isUserGesture")
@@ -83,6 +115,17 @@ class MainActivity : AppCompatActivity() {
                 transport?.webView = webView
                 resultMsg?.sendToTarget()
                 return true
+            }
+            override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                try {
+                    if (newProgress in 1..99) {
+                        if (progressBar.visibility != android.view.View.VISIBLE) progressBar.visibility = android.view.View.VISIBLE
+                        progressBar.progress = newProgress
+                    } else if (newProgress >= 100) {
+                        progressBar.progress = 100
+                        progressBar.visibility = android.view.View.GONE
+                    }
+                } catch (_: Throwable) {}
             }
         }
 
@@ -102,10 +145,38 @@ class MainActivity : AppCompatActivity() {
                 super.onPageFinished(view, url)
                 try {
                     val u = url ?: ""
-                    val isBlank = u == "about:blank" || u.startsWith("data:")
-                    if (!isBlank) lastGoodUrl = u
-                    if (isBlank && cfg.url.isNotBlank()) {
-                        Log.w(TAG, "onPageFinished: landed on blank (u='$u'), attempting recovery")
+                    lastPageUrl = u
+                    val isData = u.startsWith("data:")
+                    val isAboutBlank = u == "about:blank"
+                    val isErrorData = isData && u.contains("Load%20error")
+                    val isBlank = isAboutBlank || (isData && !isErrorData)
+                    if (!isBlank && !isErrorData) lastGoodUrl = u
+                    if ((isBlank || isErrorData) && cfg.url.isNotBlank()) {
+                        val now = System.currentTimeMillis()
+                        if (!isForeground) {
+                            Log.w(TAG, "onPageFinished: blank/error while background; suppress recovery")
+                            return
+                        }
+                        if (now < suppressedRecoveryUntil) {
+                            Log.w(TAG, "recovery: suppressed (${suppressedRecoveryUntil - now}ms left)")
+                            return
+                        }
+                        if (recoveryAttemptsWindowStart == 0L || now - recoveryAttemptsWindowStart > 15000L) {
+                            recoveryAttemptsWindowStart = now
+                            recoveryAttemptsInWindow = 0
+                        }
+                        if (recoveryAttemptsInWindow >= 4) {
+                            suppressedRecoveryUntil = now + 60000L
+                            Log.w(TAG, "recovery: too many attempts; pausing 60s")
+                            return
+                        }
+                        if (now - lastRecoveryAttemptAt < 1200L) {
+                            Log.w(TAG, "recovery: throttled (<1.2s)")
+                            return
+                        }
+                        recoveryAttemptsInWindow++
+                        lastRecoveryAttemptAt = now
+                        Log.w(TAG, "onPageFinished: attempting recovery attempt=$recoveryAttemptsInWindow blank=$isBlank errorData=$isErrorData")
                         val wv = view ?: return
                         when {
                             wv.canGoBack() -> {
@@ -121,28 +192,31 @@ class MainActivity : AppCompatActivity() {
                         return
                     }
                 } catch (_: Throwable) {}
-                maybeStartTimers(view)
+                // timers auto-managed by unified loop
                 injectLoginScript(view)
                 persistSessionIfAvailable(url)
+                // Evaluate with the WebView's current URL (may include redirects not yet in lastPageUrl)
+                val cur = try { view?.url ?: lastPageUrl } catch (_: Throwable) { lastPageUrl }
+                evaluateAutoReloadState(cur)
             }
 
-            override fun onReceivedError(view: WebView, errorCode: Int, description: String?, failingUrl: String?) {
-                Log.w(TAG, "onReceivedError: code=$errorCode desc=$description url=$failingUrl")
+            override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                if (!request.isForMainFrame) return
+                val failingUrl = request.url?.toString() ?: ""
+                val description = try { error.description?.toString() } catch (_: Throwable) { null }
+                Log.w(TAG, "onReceivedError(new): code=${error.errorCode} desc=$description url=$failingUrl")
                 try {
-                    val u = failingUrl ?: ""
                     val looksLikeChallenge =
-                        u.contains("/cdn-cgi/", ignoreCase = true) ||
-                        u.contains("/challenge", ignoreCase = true) ||
+                        failingUrl.contains("/cdn-cgi/", ignoreCase = true) ||
+                        failingUrl.contains("/challenge", ignoreCase = true) ||
                         (description?.contains("Cloudflare", ignoreCase = true) == true)
                     if (looksLikeChallenge) {
-                        Log.w(TAG, "onReceivedError: probable challenge; not replacing content")
+                        Log.w(TAG, "onReceivedError: probable challenge; letting WebView render")
                         return
                     }
-                    val isMain = (view.url == null) || (view.url == u)
-                    if (!isMain) return
                     view.loadData(
                         "<html><body style='background:#0b1220;color:#e5e7eb;font-family:sans-serif'><h3>Load error</h3><div>" +
-                            (description ?: "") + "</div><div style='margin-top:8px;font-size:12px'>" + u + "</div></body></html>",
+                            (description ?: "") + "</div><div style='margin-top:8px;font-size:12px'>" + failingUrl + "</div></body></html>",
                         "text/html",
                         "utf-8"
                     )
@@ -194,6 +268,13 @@ class MainActivity : AppCompatActivity() {
                 return true
             }
         }
+
+        webView.setOnTouchListener { _, _ ->
+            val now = System.currentTimeMillis()
+            lastInteractionAt = now
+            lastInteractionMs = now
+            false
+        }
     }
 
     private fun evalJs(view: WebView, script: String, cb: ((String) -> Unit)? = null) {
@@ -209,11 +290,6 @@ class MainActivity : AppCompatActivity() {
         val t = raw.trim()
         val lower = t.lowercase()
         val out = if (lower.startsWith("http://") || lower.startsWith("https://")) t else "https://$t"
-        try {
-            val previewIn = t.take(80)
-            val previewOut = out.take(80)
-            Log.w(TAG, "normalizedUrl: lenIn=${t.length} -> lenOut=${out.length}; '$previewIn' -> '$previewOut'")
-        } catch (_: Throwable) {}
         return out
     }
 
@@ -303,7 +379,7 @@ class MainActivity : AppCompatActivity() {
             webView.loadDataWithBaseURL("about:blank", html, "text/html", "utf-8", null)
             return
         }
-        Log.w(TAG, "navigateToConfiguredUrl: start url='${cfg.url}'")
+    // suppress verbose normalized logging; only log final URL once
         val base = normalizedUrl(cfg.url)
         var dest = base
         if (cfg.timeWindow.enabled) {
@@ -316,55 +392,127 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Throwable) {}
         setSessionCookieIfNeeded(base)
         try {
-            Log.w(TAG, "navigateToConfiguredUrl: loading '$dest'")
+            if (!initialUrlLogged) { Log.w(TAG, "Final URL: $dest"); initialUrlLogged = true }
             webView.loadUrl(dest)
         } catch (e: Throwable) {
             Log.w(TAG, "navigateToConfiguredUrl: loadUrl error: ${e.message}")
         }
     }
 
-    private fun scheduleBehaviors() {
-        keepAliveTimer?.cancel(); keepAliveTimer = null
-        if (cfg.keepAliveSec > 0) {
-            Log.w(TAG, "schedule: keepAlive every ${cfg.keepAliveSec}s")
-            val url = findViewById<WebView>(R.id.webview).url ?: return
-            keepAliveTimer = Timer().apply {
-                schedule(object : TimerTask() {
-                    override fun run() {
-                        mainHandler.post {
-                            val u = Uri.parse(url).buildUpon().appendQueryParameter("_ka", System.currentTimeMillis().toString()).build().toString()
-                            val js = "(function(){try{fetch('" + u.replace("\\", "\\\\").replace("'","\\'") + "', {method:'HEAD', credentials:'include', cache:'no-store', redirect:'manual'}).catch(function(){});}catch(e){}})();"
-                            evalJs(findViewById(R.id.webview), js, null)
-                        }
-                    }
-                }, (cfg.keepAliveSec * 1000).toLong(), (cfg.keepAliveSec * 1000).toLong())
-            }
+    private fun scheduleTimers() {
+        scheduledRunnable?.let { mainHandler.removeCallbacks(it) }
+        val now = System.currentTimeMillis()
+        var earliest = Long.MAX_VALUE
+        if (navBackActive && navBackDetectedAt > 0L) {
+            val timeoutMs = (cfg.tabTimeoutSec * 1000L).coerceAtLeast(1000L)
+            val anchor = if (lastInteractionMs > navBackDetectedAt) lastInteractionMs else navBackDetectedAt
+            val fireAt = anchor + timeoutMs
+            if (fireAt < earliest) earliest = fireAt
         }
-        reloadRunnable?.let { mainHandler.removeCallbacks(it) }
-        if (cfg.autoReloadEnabled && cfg.reloadAfterSec > 0) {
-            reloadRunnable = Runnable { findViewById<WebView>(R.id.webview).reload() }
-            mainHandler.postDelayed(reloadRunnable!!, (cfg.reloadAfterSec * 1000).toLong())
-            Log.w(TAG, "schedule: autoReload after ${cfg.reloadAfterSec}s")
+        if (autoReloadActive && reloadFireAt > 0L) {
+            if (reloadFireAt < earliest) earliest = reloadFireAt
         }
+        if (earliest == Long.MAX_VALUE) { scheduledRunnable = null; return }
+        val delay = (earliest - now).coerceAtLeast(50L)
+        scheduledRunnable = Runnable { processTimers() }
+        mainHandler.postDelayed(scheduledRunnable!!, delay)
     }
 
-    private fun maybeStartTimers(webView: WebView?) {
-        if (webView == null) return
-        val selector = cfg.waitForCss
-        if (selector.isNullOrBlank()) {
-            scheduleBehaviors()
-            return
-        }
-        val deadline = System.currentTimeMillis() + 20000
-        fun poll() {
-            if (System.currentTimeMillis() > deadline) { scheduleBehaviors(); return }
-            evalJs(webView, "(function(){return !!document.querySelector('" + selector.replace("\\","\\\\").replace("'","\\'") + "')})()") { res ->
-                val ok = res == "true"
-                if (ok) scheduleBehaviors() else mainHandler.postDelayed({ poll() }, 300)
+    private fun processTimers() {
+        val now = System.currentTimeMillis()
+        var changed = false
+        if (navBackActive && navBackDetectedAt > 0L) {
+            val timeoutMs = (cfg.tabTimeoutSec * 1000L).coerceAtLeast(1000L)
+            val anchor = if (lastInteractionMs > navBackDetectedAt) lastInteractionMs else navBackDetectedAt
+            val fireAt = anchor + timeoutMs
+            if (now >= fireAt) {
+                val baseCfg = normalizedUrl(cfg.url)
+                val (from, to) = if (cfg.timeWindow.enabled) computeWindow(cfg.timeWindow.start, cfg.timeWindow.duration) else Pair(0L,0L)
+                val desired = if (cfg.timeWindow.enabled) withWindowParams(baseCfg, from, to) else baseCfg
+                navigateBackCycle++
+                Log.w(TAG, "navigateBack: fire inactivity cycle=$navigateBackCycle -> $desired")
+                try { findViewById<WebView>(R.id.webview).loadUrl(desired) } catch (_: Throwable) {}
+                navBackActive = false
+                changed = true
             }
         }
-        poll()
+        if (autoReloadActive && reloadFireAt > 0L && now >= reloadFireAt && !navBackActive) {
+            reloadCount++
+            Log.w(TAG, "autoReload: fire count=$reloadCount interval=${cfg.reloadAfterSec}s")
+            try { findViewById<WebView>(R.id.webview).reload() } catch (_: Throwable) {}
+            val interval = (cfg.reloadAfterSec * 1000).toLong().coerceAtLeast(1000L)
+            reloadFireAt = System.currentTimeMillis() + interval
+            changed = true
+        }
+        if (changed) scheduleTimers() else scheduleTimers()
     }
+
+    private fun prepareAutoReload(now: Long) {
+        val intervalMs = (cfg.reloadAfterSec * 1000).toLong().coerceAtLeast(1000L)
+        reloadFireAt = now + intervalMs
+        autoReloadActive = true
+        autoReloadRunning = true
+        Log.w(TAG, "autoReload: scheduled fireIn=${intervalMs/1000}s")
+        scheduleTimers()
+    }
+
+    private fun isOnTarget(current: String?): Boolean {
+        if (current.isNullOrBlank()) return false
+        val baseCfg = normalizedUrl(cfg.url)
+        val (from, to) = if (cfg.timeWindow.enabled) computeWindow(cfg.timeWindow.start, cfg.timeWindow.duration) else Pair(0L,0L)
+        val desired = if (cfg.timeWindow.enabled) withWindowParams(baseCfg, from, to) else baseCfg
+        val curBase = stripFromTo(current)
+        val targetBase = stripFromTo(desired)
+        return curBase == targetBase && curBase.isNotBlank()
+    }
+
+    private fun evaluateAutoReloadState(current: String) {
+        val now = System.currentTimeMillis()
+        val onTarget = isOnTarget(current)
+        if (onTarget) {
+            // If we were in a navigateBack cycle and returned, clear it
+            if (navBackActive) {
+                navBackActive = false
+                navBackDetectedAt = 0L
+                Log.w(TAG, "navigateBack: returned to target; clearing inactivity monitor")
+            }
+            // Avoid kicking auto reload while on external login SSO or challenge pages
+            val host = try { Uri.parse(current).host ?: "" } catch (_: Throwable) { "" }
+            val isAuthHost = host.contains("login.", true) || host.contains("auth", true) || host.contains("challenge", true)
+            if (!isAuthHost && cfg.autoReloadEnabled && cfg.reloadAfterSec > 0 && !autoReloadActive) {
+                prepareAutoReload(now)
+            }
+        } else {
+            // Off target. Disable any running auto reload and arm navigateBack if enabled.
+            if (autoReloadActive || autoReloadRunning) {
+                autoReloadActive = false
+                autoReloadRunning = false
+                reloadFireAt = 0L
+                Log.w(TAG, "autoReload: suspended (off target)")
+            }
+            if (cfg.navigateBackEnabled) {
+                val host = try { Uri.parse(current).host ?: "" } catch (_: Throwable) { "" }
+                val isAuthHost = host.contains("login.", true) || host.contains("auth", true) || host.contains("challenge", true)
+                if (isAuthHost) {
+                    // Defer navigateBack while in auth flows; user/JS needs to complete login.
+                    navBackActive = false
+                } else {
+                    if (!navBackActive) {
+                        navBackActive = true
+                        navBackDetectedAt = now
+                        Log.w(TAG, "navigateBack: divergence detected inactivity=${cfg.tabTimeoutSec}s current=$current")
+                    } else if (now - navBackDetectedAt > 2000) {
+                        navBackDetectedAt = now
+                    }
+                }
+            } else navBackActive = false
+        }
+        // Recompute timers whenever state changes
+        scheduleTimers()
+    }
+
+        // end evaluateAutoReloadState
+    // (no closing brace here; keep class open)
 
     private fun injectLoginScript(webView: WebView?) {
         if (webView == null) return
@@ -387,7 +535,7 @@ class MainActivity : AppCompatActivity() {
                     function findAny(ars){ for(const s of ars){ const el=document.querySelector(s); if(el) return el; } return null; }
                     function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
                     async function runOnce(){
-                        try{ Native.log('auto:run'); }catch(e){}
+                        // removed verbose run log
                         const emailEl=findAny(emailSel);
                         if(emailEl && EMAIL){
                             if(emailEl.value!==EMAIL){ emailEl.focus(); emailEl.value=''; emailEl.dispatchEvent(new Event('input',{bubbles:true})); emailEl.value=EMAIL; emailEl.dispatchEvent(new Event('input',{bubbles:true})); try{Native.log('auto:filled-email');}catch(e){} }
@@ -408,6 +556,11 @@ class MainActivity : AppCompatActivity() {
                     (function loop(){ runOnce().catch(()=>{}).finally(()=>{ ticks++; if(ticks<max) setTimeout(loop, 500); }); })();
                     window.addEventListener('hashchange', ()=>{ try{Native.log('auto:hashchange');}catch(e){}; ticks=0; });
                     window.addEventListener('popstate', ()=>{ try{Native.log('auto:popstate');}catch(e){}; ticks=0; });
+                    try {
+                        ['click','keydown','touchstart','mousemove','scroll'].forEach(evt=>{
+                            window.addEventListener(evt, ()=>{ try{Native.interact();}catch(e){} }, {passive:true});
+                        });
+                    } catch(e) { try{Native.log('auto:listener-error '+e.message);}catch(_){} }
                 }catch(e){ try{Native.log('auto:bootstrap-error '+(e&&e.message));}catch(_){} }
             })();
         """.trimIndent()
@@ -422,10 +575,25 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
+        isForeground = true
+        val now = System.currentTimeMillis()
+        if (now > suppressedRecoveryUntil) {
+            recoveryAttemptsInWindow = 0
+            recoveryAttemptsWindowStart = 0L
+        }
         cfg = cfgStore.load()
-        try { Log.w(TAG, "onResume: cfg.url='${cfg.url}', reloadAfter=${cfg.reloadAfterSec}, autoReload=${cfg.autoReloadEnabled}") } catch (_: Throwable) {}
+    try { Log.w(TAG, "onResume: cfg.url='${cfg.url}', reloadAfter=${cfg.reloadAfterSec}, autoReload=${cfg.autoReloadEnabled}") } catch (_: Throwable) {}
         navigateToConfiguredUrl()
-        startWatchdog()
+    startWatchdog()
+    startNavigateBackMonitor()
+    // Initialize auto reload state based on current page (may already be on target)
+    try { findViewById<WebView>(R.id.webview)?.let { evaluateAutoReloadState(it.url ?: "") } } catch (_: Throwable) {}
+    // Touch listener already set in setupWebView; no duplicate here
+    }
+
+    override fun onPause() {
+        super.onPause()
+        isForeground = false
     }
 
     private var watchdogRunnable: Runnable? = null
@@ -436,19 +604,22 @@ class MainActivity : AppCompatActivity() {
             override fun run() {
                 try {
                     val current = webView.url ?: ""
-                    val baseCfg = normalizedUrl(cfg.url)
-                    val (from, to) = if (cfg.timeWindow.enabled) computeWindow(cfg.timeWindow.start, cfg.timeWindow.duration) else Pair(0L, 0L)
-                    val desired = if (cfg.timeWindow.enabled) withWindowParams(baseCfg, from, to) else baseCfg
-                    if (cfg.navigateBackEnabled) {
-                        val curBase = stripFromTo(current)
-                        val targetBase = stripFromTo(desired)
-                        if (curBase.isNotEmpty() && targetBase.isNotEmpty() && curBase != targetBase) {
-                            webView.loadUrl(desired)
-                            mainHandler.postDelayed(this, 5000)
-                            return
-                        }
-                    }
                     if (cfg.timeWindow.enabled) {
+                        // Only enforce window params when we're on the target host (avoid fighting SSO/login redirects)
+                        val targetBase = normalizedUrl(cfg.url)
+                        val targetHost = try { Uri.parse(targetBase).host } catch (_: Throwable) { null }
+                        val curHost = try { Uri.parse(current).host } catch (_: Throwable) { null }
+                        if (targetHost != null && curHost != null) {
+                            val sameHost = curHost == targetHost || curHost.endsWith(".$targetHost")
+                            if (!sameHost) {
+                                // Skip adjustment; will retry later after auth flow lands on target
+                                mainHandler.postDelayed(this, 5000)
+                                return
+                            }
+                        }
+                        val baseCfg = normalizedUrl(cfg.url)
+                        val (from, to) = computeWindow(cfg.timeWindow.start, cfg.timeWindow.duration)
+                        val desired = withWindowParams(baseCfg, from, to)
                         val uri = Uri.parse(current)
                         val curFrom = uri.getQueryParameter("from")?.toLongOrNull() ?: 0L
                         val curTo = uri.getQueryParameter("to")?.toLongOrNull() ?: 0L
@@ -461,6 +632,30 @@ class MainActivity : AppCompatActivity() {
             }
         }
         mainHandler.postDelayed(watchdogRunnable!!, 5000)
+    }
+
+    private fun startNavigateBackMonitor() {
+        if (!cfg.navigateBackEnabled) { navBackActive = false; return }
+        lastNavBackIntervalSec = cfg.tabTimeoutSec.coerceAtLeast(1)
+        val webView: WebView = findViewById(R.id.webview)
+        val current = webView.url ?: ""
+        lastPageUrl = current
+        val baseCfg = normalizedUrl(cfg.url)
+        val (from, to) = if (cfg.timeWindow.enabled) computeWindow(cfg.timeWindow.start, cfg.timeWindow.duration) else Pair(0L,0L)
+        val desired = if (cfg.timeWindow.enabled) withWindowParams(baseCfg, from, to) else baseCfg
+        val curBase = stripFromTo(current)
+        val targetBase = stripFromTo(desired)
+        if (curBase.isNotEmpty() && targetBase.isNotEmpty() && curBase != targetBase) {
+            if (!navBackActive) {
+                navBackActive = true
+                navBackDetectedAt = System.currentTimeMillis()
+                Log.w(TAG, "navigateBack: divergence detected (resume) inactivity=${cfg.tabTimeoutSec}s current=$curBase target=$targetBase")
+                autoReloadActive = false
+                autoReloadRunning = false
+            }
+        } else navBackActive = false
+    scheduleTimers()
+    evaluateAutoReloadState(current)
     }
 
     private fun stripFromTo(u: String): String {

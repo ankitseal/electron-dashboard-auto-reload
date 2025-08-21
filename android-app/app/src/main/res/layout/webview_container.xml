@@ -7,4 +7,16 @@
         android:id="@+id/webview"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
+
+    <ProgressBar
+        android:id="@+id/page_progress"
+        style="@android:style/Widget.ProgressBar.Horizontal"
+        android:layout_width="match_parent"
+        android:layout_height="2dp"
+        android:layout_gravity="top"
+        android:max="100"
+        android:indeterminate="false"
+        android:progress="0"
+        android:progressDrawable="@android:drawable/progress_horizontal"
+        android:visibility="gone"/>
 </FrameLayout>

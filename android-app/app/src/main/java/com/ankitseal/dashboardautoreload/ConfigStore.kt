@@ -15,6 +15,14 @@ import javax.crypto.spec.SecretKeySpec
 /** Simple JSON-backed config compatible with the Electron app's config.json keys. */
 class ConfigStore(private val context: Context) {
     private val TAG = "DAR.ConfigStore"
+    // Cache for frequently accessed decrypted values to avoid UI-thread disk IO
+    @Volatile private var cachedTwoFASecret: String? = null
+    @Volatile private var cachedConfig: Config? = null
+    @Volatile private var cachedConfigMtime: Long = -1L
+    companion object {
+        @Volatile private var lastSntpAttemptMs: Long = 0L
+        private const val SNTP_MIN_INTERVAL_MS = 5 * 60 * 1000L // 5 min
+    }
     data class TimeWindow(
         var enabled: Boolean = false,
         var start: String = "12:00",
@@ -24,9 +32,7 @@ class ConfigStore(private val context: Context) {
     data class Config(
         var url: String = "",
         var session: String = "",
-        var keepAliveSec: Int = 0,
         var reloadAfterSec: Int = 0,
-        var waitForCss: String? = null,
         var user: User = User(),
         var timeWindow: TimeWindow = TimeWindow(),
         var autoReloadEnabled: Boolean = false,
@@ -39,7 +45,6 @@ class ConfigStore(private val context: Context) {
     private fun baseDir(): File {
         val base = File(context.filesDir, "DashboardAutoReload")
         if (!base.exists()) base.mkdirs()
-    try { Log.w(TAG, "baseDir=${base.absolutePath} exists=${base.exists()}") } catch (_: Throwable) {}
         return base
     }
 
@@ -95,6 +100,9 @@ class ConfigStore(private val context: Context) {
             try { Log.w(TAG, "load: no config file at ${f.absolutePath}") } catch (_: Throwable) {}
             return Config()
         }
+    val mtime = f.lastModified()
+    val cached = cachedConfig
+    if (cached != null && mtime == cachedConfigMtime) return cached
         return try {
             val txt = f.readText()
             try { Log.w(TAG, "load: read ${txt.length} bytes from ${f.absolutePath}") } catch (_: Throwable) {}
@@ -102,12 +110,7 @@ class ConfigStore(private val context: Context) {
             val cfg = Config()
             cfg.url = o.optString("url", "")
             cfg.session = o.optString("session", "")
-            cfg.keepAliveSec = o.optInt("keepAliveSec", 0)
             cfg.reloadAfterSec = o.optInt("reloadAfterSec", 0)
-            cfg.waitForCss = if (o.has("waitForCss")) {
-                val v = o.optString("waitForCss", "")
-                if (v.isBlank()) null else v
-            } else null
             // Prefer encrypted user if available
             val userEnc = o.optJSONObject("userEnc")
             val userPlain = o.optJSONObject("user")
@@ -129,10 +132,13 @@ class ConfigStore(private val context: Context) {
             cfg.tabTimeoutSec = o.optInt("tabTimeoutSec", 600)
             cfg.twoFAEnabled = o.optBoolean("twoFAEnabled", false)
             cfg.hasTwoFASecret = o.has("twoFAEnc")
-            try { Log.w(TAG, "load: url='${cfg.url}', keepAlive=${cfg.keepAliveSec}, reloadAfter=${cfg.reloadAfterSec}, autoReload=${cfg.autoReloadEnabled}, tw=${cfg.timeWindow.enabled}:${cfg.timeWindow.start}/${cfg.timeWindow.duration}") } catch (_: Throwable) {}
+            // Prime cache lazily only when needed
+            // reduced logging
+            cachedConfig = cfg
+            cachedConfigMtime = mtime
             cfg
         } catch (_: Throwable) {
-            try { Log.w(TAG, "load: failed to parse, returning defaults") } catch (_: Throwable) {}
+            // silent fallback
             Config()
         }
     }
@@ -144,9 +150,7 @@ class ConfigStore(private val context: Context) {
         val o = JSONObject()
         o.put("url", cfg.url)
         o.put("session", cfg.session)
-        o.put("keepAliveSec", cfg.keepAliveSec)
-        o.put("reloadAfterSec", cfg.reloadAfterSec)
-        if (cfg.waitForCss != null) o.put("waitForCss", cfg.waitForCss)
+    o.put("reloadAfterSec", cfg.reloadAfterSec)
         val hasUser = cfg.user.email.isNotBlank() || cfg.user.password.isNotBlank()
         if (hasUser) {
             encryptJson(JSONObject().apply {
@@ -170,24 +174,21 @@ class ConfigStore(private val context: Context) {
         if (existing.has("twoFAEnc")) o.put("twoFAEnc", existing.getJSONObject("twoFAEnc"))
         val json = o.toString(2)
         f.writeText(json)
-        try {
-            val verifyTxt = f.readText()
-            val verify = JSONObject(verifyTxt)
-            Log.w(TAG, "save: wrote ${json.length} bytes to ${f.absolutePath}; roundTrip.url='${verify.optString("url", "")}'")
-        } catch (e: Throwable) {
-            try { Log.w(TAG, "save: failed verify read: ${e.message}") } catch (_: Throwable) {}
-        }
+    // silent save
     }
 
     fun registerTwoFA(secretRaw: String) {
+        // Mirror Electron: accept otpauth:// or Base32; persist only the secret
         val secret = extractBase32Secret(secretRaw)
         if (secret.isBlank()) return
-        try { Log.w(TAG, "registerTwoFA: registering secret len=${secret.length}") } catch (_: Throwable) {}
+    // silent
         val existing = try { if (configFile().exists()) JSONObject(configFile().readText()) else JSONObject() } catch (_: Throwable) { JSONObject() }
         encryptJson(JSONObject().apply { put("secret", secret) })?.let { enc ->
             existing.put("twoFAEnc", enc)
             existing.put("twoFAEnabled", true)
             configFile().writeText(existing.toString(2))
+            cachedTwoFASecret = secret
+            cachedConfig = null // invalidate so next load re-parses flags
             try { Log.w(TAG, "registerTwoFA: saved twoFAEnc; file=${configFile().absolutePath}") } catch (_: Throwable) {}
         }
     }
@@ -196,56 +197,64 @@ class ConfigStore(private val context: Context) {
         val existing = try { if (configFile().exists()) JSONObject(configFile().readText()) else JSONObject() } catch (_: Throwable) { JSONObject() }
         existing.remove("twoFAEnc")
         configFile().writeText(existing.toString(2))
-    try { Log.w(TAG, "removeTwoFASecret: removed; file=${configFile().absolutePath}") } catch (_: Throwable) {}
+    cachedTwoFASecret = null
+    cachedConfig = null
+    // silent
     }
 
-    fun hasTwoFA(): Boolean {
-        val existing = try { if (configFile().exists()) JSONObject(configFile().readText()) else JSONObject() } catch (_: Throwable) { JSONObject() }
-    val has = existing.has("twoFAEnc")
-    try { Log.w(TAG, "hasTwoFA: ${has}") } catch (_: Throwable) {}
-    return has
-    }
+    fun hasTwoFA(): Boolean = getTwoFASecret().isNotBlank()
 
-    fun getTOTPCode(): String {
+    fun getTwoFASecret(): String {
+        cachedTwoFASecret?.let { return it }
         val existing = try { if (configFile().exists()) JSONObject(configFile().readText()) else JSONObject() } catch (_: Throwable) { JSONObject() }
         val enc = existing.optJSONObject("twoFAEnc") ?: return ""
         val dec = decryptJson(enc) ?: return ""
         val secret = dec.optString("secret", "").trim()
         if (secret.isBlank()) return ""
-    val code = generateTOTP(secret)
-    try { Log.w(TAG, "getTOTPCode: generated (masked) ****${code.takeLast(2)}") } catch (_: Throwable) {}
-    return code
+        cachedTwoFASecret = secret
+        return secret
     }
 
+    fun getTOTPCode(): String {
+        val secret = getTwoFASecret()
+        if (secret.isBlank()) return ""
+        return generateTOTP(secret, 30, 6)
+    }
+
+    fun getTOTPCodeFromSecret(secret: String): String = if (secret.isBlank()) "" else generateTOTP(secret,30,6)
+
     private fun extractBase32Secret(input: String): String {
+        // Mirror Electron: remove spaces only; uppercase; parse otpauth://secret
         val raw = input.trim()
         return try {
             if (raw.lowercase().startsWith("otpauth://")) {
                 val u = android.net.Uri.parse(raw)
-                (u.getQueryParameter("secret") ?: "").replace(" ", "").uppercase()
-            } else raw.replace(" ", "").uppercase()
-        } catch (_: Throwable) { raw.replace(" ", "").uppercase() }
+                (u.getQueryParameter("secret") ?: "").replace("\n", "").replace("\r", "").replace(" ", "").uppercase()
+            } else raw.replace("\n", "").replace("\r", "").replace(" ", "").uppercase()
+        } catch (_: Throwable) { raw.replace("\n", "").replace("\r", "").replace(" ", "").uppercase() }
     }
 
     private fun base32ToBytes(b32: String): ByteArray {
+        // Mirror Electron: RFC 4648 Base32; uppercase; strip trailing '=' padding; skip invalid chars
         val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
-        val clean = b32.uppercase().replace("=", "")
+        val clean = b32.uppercase().replace(Regex("=+ ?$") ,"").replace(Regex("=+$"), "")
         val bits = StringBuilder()
         for (ch in clean) {
             val idx = alphabet.indexOf(ch)
-            if (idx >= 0) bits.append(idx.toString(2).padStart(5, '0'))
+            if (idx == -1) continue
+            bits.append(idx.toString(2).padStart(5, '0'))
         }
         val out = ArrayList<Byte>()
         var i = 0
         while (i + 8 <= bits.length) {
-            val byteStr = bits.substring(i, i + 8)
-            out.add(byteStr.toInt(2).toByte())
+            out.add(bits.substring(i, i + 8).toInt(2).toByte())
             i += 8
         }
         return out.toByteArray()
     }
 
     private fun hmacSha1(key: ByteArray, data: ByteArray): ByteArray {
+        // Mirror Electron: HMAC-SHA1
         val mac = Mac.getInstance("HmacSHA1")
         val sk = SecretKeySpec(key, "HmacSHA1")
         mac.init(sk)
@@ -253,11 +262,18 @@ class ConfigStore(private val context: Context) {
     }
 
     private fun generateTOTP(secretB32: String, timeStep: Int = 30, digits: Int = 6): String {
+        // Mirror Electron: SHA1 + 6 digits + 30s period
         val key = base32ToBytes(secretB32)
         if (key.isEmpty()) return ""
-        val counter = (System.currentTimeMillis() / 1000L / timeStep)
+        // Throttle SNTP attempts to avoid jank
+        val nowWall = System.currentTimeMillis()
+        if (nowWall - lastSntpAttemptMs > SNTP_MIN_INTERVAL_MS) {
+            try { SntpClient.ensureSyncAsync(); lastSntpAttemptMs = nowWall } catch (_: Throwable) {}
+        }
+    val nowMs = try { SntpClient.currentTimeMillis() } catch (_: Throwable) { System.currentTimeMillis() }
+    val counter = (nowMs / 1000L / timeStep)
         val buf = ByteArray(8)
-        // big-endian
+        // big-endian counter
         val high = (counter ushr 32).toInt()
         val low = counter.toInt()
         buf[0] = (high ushr 24).toByte(); buf[1] = (high ushr 16).toByte(); buf[2] = (high ushr 8).toByte(); buf[3] = high.toByte()
@@ -268,4 +284,6 @@ class ConfigStore(private val context: Context) {
         val mod = Math.floorMod(codeInt, Math.pow(10.0, digits.toDouble()).toInt())
         return mod.toString().padStart(digits, '0')
     }
+
+    // No algorithm/digits/period parsing: align with Electron (SHA1/6d/30s)
 }

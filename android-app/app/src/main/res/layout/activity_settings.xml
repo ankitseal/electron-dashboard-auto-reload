@@ -1,23 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <com.google.android.material.appbar.MaterialToolbar
+        android:id="@+id/toolbar_settings"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/colorPrimaryContainer"
+        android:title="Settings"
+        android:titleTextAppearance="@style/TextAppearance.Material3.TitleLarge"
+        app:titleCentered="false" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:padding="24dp">
-
-            <!-- Header -->
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Settings"
-                android:textSize="22sp"
-                android:textStyle="bold"
-                android:paddingBottom="8dp" />
 
             <!-- Target card -->
             <com.google.android.material.card.MaterialCardView
@@ -40,14 +46,16 @@
                             android:layout_height="wrap_content"
                             android:inputType="textUri" />
                     </com.google.android.material.textfield.TextInputLayout>
-                    <TextView android:text="SESSION" android:layout_width="match_parent" android:layout_height="wrap_content" />
+            <TextView android:text="SESSION (auto-captured)" android:layout_width="match_parent" android:layout_height="wrap_content" />
                     <com.google.android.material.textfield.TextInputLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content">
                         <com.google.android.material.textfield.TextInputEditText
                             android:id="@+id/et_session"
                             android:layout_width="match_parent"
-                            android:layout_height="wrap_content" />
+                android:layout_height="wrap_content"
+                android:enabled="false"
+                android:focusable="false" />
                     </com.google.android.material.textfield.TextInputLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
@@ -87,7 +95,7 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- Page Behavior card -->
+            <!-- Auto Refresh card (simplified) -->
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -97,17 +105,12 @@
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
                     android:padding="16dp">
-                    <TextView android:text="Page Behavior" android:textStyle="bold" android:layout_width="match_parent" android:layout_height="wrap_content" />
-                    <TextView android:text="Keep Alive (sec)" android:layout_width="match_parent" android:layout_height="wrap_content" />
-                    <com.google.android.material.textfield.TextInputLayout
+                    <TextView android:text="Auto Refresh" android:textStyle="bold" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/cb_auto"
                         android:layout_width="match_parent"
-                        android:layout_height="wrap_content">
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/et_keepalive"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:inputType="number" />
-                    </com.google.android.material.textfield.TextInputLayout>
+                        android:layout_height="wrap_content"
+                        android:text="Auto refresh" />
                     <TextView android:text="Reload After (sec)" android:layout_width="match_parent" android:layout_height="wrap_content" />
                     <com.google.android.material.textfield.TextInputLayout
                         android:layout_width="match_parent"
@@ -118,21 +121,6 @@
                             android:layout_height="wrap_content"
                             android:inputType="number" />
                     </com.google.android.material.textfield.TextInputLayout>
-                    <TextView android:text="Wait For CSS" android:layout_width="match_parent" android:layout_height="wrap_content" />
-                    <com.google.android.material.textfield.TextInputLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content">
-                        <com.google.android.material.textfield.TextInputEditText
-                            android:id="@+id/et_waitcss"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content" />
-                    </com.google.android.material.textfield.TextInputLayout>
-                    <com.google.android.material.materialswitch.MaterialSwitch
-                        android:id="@+id/cb_auto"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="Auto Refresh Enabled"
-                        android:paddingTop="8dp" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
@@ -152,24 +140,38 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:text="Enable rolling window" />
-                    <TextView android:text="Daily start (HH:MM)" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <TextView
+                        android:id="@+id/tv_twstart_label"
+                        android:text="Daily start"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
                     <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/layout_twstart"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content">
                         <com.google.android.material.textfield.TextInputEditText
                             android:id="@+id/et_twstart"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
+                            android:focusable="false"
+                            android:clickable="true"
                             android:hint="12:00" />
                     </com.google.android.material.textfield.TextInputLayout>
-                    <TextView android:text="Duration (e.g., 1d, 6h)" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <TextView
+                        android:id="@+id/tv_twdur_label"
+                        android:text="Duration"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
                     <com.google.android.material.textfield.TextInputLayout
+                        android:id="@+id/layout_twdur"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content">
                         <com.google.android.material.textfield.TextInputEditText
                             android:id="@+id/et_twdur"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
+                            android:focusable="false"
+                            android:clickable="true"
                             android:hint="1d" />
                     </com.google.android.material.textfield.TextInputLayout>
                 </LinearLayout>
@@ -191,7 +193,7 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:text="Navigate back to default URL" />
-                    <TextView android:text="Close child tabs after (sec)" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <TextView android:text="Return to default after inactivity (sec)" android:layout_width="match_parent" android:layout_height="wrap_content" />
                     <com.google.android.material.textfield.TextInputLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content">
@@ -304,13 +306,7 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
-            <!-- Save button -->
-            <com.google.android.material.button.MaterialButton
-                android:id="@+id/btn_save"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Save"
-                android:minHeight="56dp" />
-
         </LinearLayout>
     </ScrollView>
+
+</LinearLayout>
