@@ -7,7 +7,8 @@
         android:allowBackup="false"
         android:label="Dashboard Auto Reload"
         android:icon="@mipmap/ic_launcher"
-        android:usesCleartextTraffic="false"
+        android:theme="@style/Theme.DashboardAutoReload"
+        android:usesCleartextTraffic="true"
         android:networkSecurityConfig="@xml/network_security_config">
         <activity
             android:name=".MainActivity"

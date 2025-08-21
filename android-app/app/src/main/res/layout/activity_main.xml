@@ -16,8 +16,9 @@
         android:layout_height="wrap_content"
         android:layout_margin="16dp"
         android:contentDescription="Settings"
-        app:srcCompat="@android:drawable/ic_menu_preferences"
-        app:tint="@color/white"
+    app:srcCompat="@android:drawable/ic_menu_preferences"
+    app:tint="@color/white"
+    app:backgroundTint="@color/purple_200"
         app:layout_anchorGravity="bottom|end"
         app:layout_anchor="@id/web_container" />
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

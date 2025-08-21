@@ -1,50 +1,316 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="16dp">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="24dp">
 
-        <TextView android:text="URL" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-        <EditText android:id="@+id/et_url" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textUri"/>
+            <!-- Header -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Settings"
+                android:textSize="22sp"
+                android:textStyle="bold"
+                android:paddingBottom="8dp" />
 
-        <TextView android:text="SESSION" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-        <EditText android:id="@+id/et_session" android:layout_width="match_parent" android:layout_height="wrap_content"/>
+            <!-- Target card -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+                    <TextView android:text="Target" android:textStyle="bold" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <TextView android:text="URL" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/et_url"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="textUri" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <TextView android:text="SESSION" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/et_session"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
 
-        <TextView android:text="Email" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-        <EditText android:id="@+id/et_email" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textEmailAddress"/>
+            <!-- Login card -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+                    <TextView android:text="Login" android:textStyle="bold" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <TextView android:text="Email" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/et_email"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="textEmailAddress" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <TextView android:text="Password" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        app:endIconMode="password_toggle">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/et_password"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="textPassword" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
 
-        <TextView android:text="Password" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-        <EditText android:id="@+id/et_password" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="textPassword"/>
+            <!-- Page Behavior card -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+                    <TextView android:text="Page Behavior" android:textStyle="bold" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <TextView android:text="Keep Alive (sec)" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/et_keepalive"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="number" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <TextView android:text="Reload After (sec)" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/et_reload"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="number" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <TextView android:text="Wait For CSS" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/et_waitcss"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/cb_auto"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Auto Refresh Enabled"
+                        android:paddingTop="8dp" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
 
-        <TextView android:text="Keep Alive (sec)" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-        <EditText android:id="@+id/et_keepalive" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number"/>
+            <!-- Rolling Window card -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+                    <TextView android:text="Rolling Window" android:textStyle="bold" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/cb_twenabled"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Enable rolling window" />
+                    <TextView android:text="Daily start (HH:MM)" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/et_twstart"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:hint="12:00" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <TextView android:text="Duration (e.g., 1d, 6h)" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/et_twdur"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:hint="1d" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
 
-        <TextView android:text="Reload After (sec)" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-        <EditText android:id="@+id/et_reload" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number"/>
+            <!-- Navigation card -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+                    <TextView android:text="Navigation" android:textStyle="bold" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/cb_navback"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Navigate back to default URL" />
+                    <TextView android:text="Close child tabs after (sec)" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/et_tabto"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="number" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
 
-        <TextView android:text="Wait For CSS" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-        <EditText android:id="@+id/et_waitcss" android:layout_width="match_parent" android:layout_height="wrap_content" />
+            <!-- 2FA card -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+                    <TextView android:text="Two-Factor Authentication (TOTP)" android:textStyle="bold" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <com.google.android.material.materialswitch.MaterialSwitch
+                        android:id="@+id/cb_twofa"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Enable 2FA autofill during login" />
+                    <TextView
+                        android:id="@+id/tv_twofa_status"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Registered"
+                        android:textStyle="bold"
+                        android:textColor="#2e7d32"
+                        android:visibility="gone"
+                        android:paddingTop="4dp" />
 
-        <CheckBox android:id="@+id/cb_auto" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Auto Refresh Enabled"/>
+                    <TextView android:id="@+id/tv_twofa_secret_label" android:text="Secret Key (paste base32 or otpauth URI)" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content">
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/et_twofa"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:hint="JBSWY3DPEHPK3PXP or otpauth://..." />
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <LinearLayout
+                        android:orientation="horizontal"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:paddingTop="8dp">
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btn_twofa_register"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Register" />
+                        <com.google.android.material.button.MaterialButton
+                            android:id="@+id/btn_twofa_remove"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="Remove Key" />
+                    </LinearLayout>
 
-        <TextView android:text="Rolling Start (HH:MM)" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-        <EditText android:id="@+id/et_twstart" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="12:00" />
+                    <!-- Inline TOTP preview -->
+                    <TextView
+                        android:id="@+id/tv_totp_label"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Current Code"
+                        android:paddingTop="8dp"
+                        android:visibility="gone" />
+                    <LinearLayout
+                        android:id="@+id/totp_row"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:visibility="gone"
+                        android:paddingTop="4dp">
+                        <com.google.android.material.progressindicator.CircularProgressIndicator
+                            android:id="@+id/totp_ring"
+                            style="@style/Widget.Material3.CircularProgressIndicator"
+                            android:layout_width="28dp"
+                            android:layout_height="28dp"
+                            app:indicatorDirectionCircular="clockwise"
+                            app:indicatorSize="6dp"
+                            app:indicatorColor="#2e7d32"
+                            app:trackThickness="6dp"
+                            app:trackColor="#e0e0e0"
+                            android:indeterminate="false"
+                            app:showAnimationBehavior="none"
+                            app:hideAnimationBehavior="none" />
+                        <TextView
+                            android:id="@+id/tv_totp_code"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="—"
+                            android:textStyle="bold"
+                            android:textSize="22sp"
+                            android:fontFamily="monospace"
+                            android:paddingStart="12dp"
+                            android:paddingEnd="12dp"
+                            android:clickable="true"
+                            android:focusable="true" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
 
-        <TextView android:text="Rolling Duration" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-        <EditText android:id="@+id/et_twdur" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="1d" />
+            <!-- Save button -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_save"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Save"
+                android:minHeight="56dp" />
 
-        <CheckBox android:id="@+id/cb_twenabled" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Enable rolling window"/>
-
-        <CheckBox android:id="@+id/cb_navback" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Navigate back to default URL"/>
-
-        <TextView android:text="Close child tabs after (sec)" android:layout_width="match_parent" android:layout_height="wrap_content"/>
-        <EditText android:id="@+id/et_tabto" android:layout_width="match_parent" android:layout_height="wrap_content" android:inputType="number"/>
-
-        <Button android:id="@+id/btn_save" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Save"/>
-    </LinearLayout>
-</ScrollView>
+        </LinearLayout>
+    </ScrollView>
