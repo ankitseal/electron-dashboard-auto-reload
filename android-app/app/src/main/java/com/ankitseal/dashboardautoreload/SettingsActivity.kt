@@ -24,31 +24,33 @@ class SettingsActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
-        store = ConfigStore(this)
-    // Load config once; heavy IO avoided by internal cache
-    val cfg = store.load()
+        // Defer heavier config load & view wiring until after first frame to reduce SurfaceSyncGroup timeout risk
+        window.decorView.post { initializeSettingsUI() }
+    }
 
-    // Populate fields
-    findViewById<EditText>(R.id.et_url).setText(cfg.url)
-    val sessionEt = findViewById<EditText>(R.id.et_session)
-    sessionEt.setText(cfg.session)
-    sessionEt.isEnabled = false
-    sessionEt.isFocusable = false
-    findViewById<EditText>(R.id.et_email).setText(cfg.user.email)
-    findViewById<EditText>(R.id.et_password).setText(cfg.user.password)
-    findViewById<EditText>(R.id.et_reload).setText(cfg.reloadAfterSec.toString())
-    findViewById<MaterialSwitch>(R.id.cb_auto).isChecked = cfg.autoReloadEnabled
-    findViewById<EditText>(R.id.et_twstart).setText(cfg.timeWindow.start)
-    findViewById<EditText>(R.id.et_twdur).setText(cfg.timeWindow.duration)
-    val twSwitch = findViewById<MaterialSwitch>(R.id.cb_twenabled)
-    twSwitch.isChecked = cfg.timeWindow.enabled
-    findViewById<MaterialSwitch>(R.id.cb_navback).isChecked = cfg.navigateBackEnabled
-    findViewById<EditText>(R.id.et_tabto).setText(cfg.tabTimeoutSec.toString())
-    findViewById<MaterialSwitch>(R.id.cb_twofa).isChecked = cfg.twoFAEnabled
-    // Keep secret input enabled initially; we'll hide when registered
-    findViewById<EditText>(R.id.et_twofa).isEnabled = true
-    // Defer 2FA UI work until after initial layout to reduce first-frame cost
-    window.decorView.post { syncTwoFASection() }
+    private fun initializeSettingsUI() {
+        if (isFinishing || isDestroyed) return
+        store = ConfigStore(this)
+        val cfg = store.load()
+
+        // Populate fields
+        findViewById<EditText>(R.id.et_url).setText(cfg.url)
+        val sessionEt = findViewById<EditText>(R.id.et_session)
+        sessionEt.setText(cfg.session)
+        sessionEt.isEnabled = false
+        sessionEt.isFocusable = false
+        findViewById<EditText>(R.id.et_email).setText(cfg.user.email)
+        findViewById<EditText>(R.id.et_password).setText(cfg.user.password)
+        findViewById<EditText>(R.id.et_reload).setText(cfg.reloadAfterSec.toString())
+        findViewById<MaterialSwitch>(R.id.cb_auto).isChecked = cfg.autoReloadEnabled
+        findViewById<EditText>(R.id.et_twstart).setText(cfg.timeWindow.start)
+        findViewById<EditText>(R.id.et_twdur).setText(cfg.timeWindow.duration)
+        val twSwitch = findViewById<MaterialSwitch>(R.id.cb_twenabled)
+        twSwitch.isChecked = cfg.timeWindow.enabled
+        findViewById<MaterialSwitch>(R.id.cb_navback).isChecked = cfg.navigateBackEnabled
+        findViewById<EditText>(R.id.et_tabto).setText(cfg.tabTimeoutSec.toString())
+        findViewById<MaterialSwitch>(R.id.cb_twofa).isChecked = cfg.twoFAEnabled
+        findViewById<EditText>(R.id.et_twofa).isEnabled = true
 
         // Dynamic enable/disable for dependent numeric fields
         fun updateFieldStates() {
@@ -62,11 +64,11 @@ class SettingsActivity : AppCompatActivity() {
             tabEt.isEnabled = navOn
             if (autoOn) {
                 val v = reloadEt.text.toString().trim().toIntOrNull() ?: 0
-                if (v <= 0) reloadEt.setText("60") // default reload 60s
+                if (v <= 0) reloadEt.setText("60")
             }
             if (navOn) {
                 val v = tabEt.text.toString().trim().toIntOrNull() ?: 0
-                if (v <= 0) tabEt.setText("600") // default inactivity 600s
+                if (v <= 0) tabEt.setText("600")
             }
         }
         findViewById<MaterialSwitch>(R.id.cb_auto).setOnCheckedChangeListener { _, _ -> updateFieldStates() }
@@ -114,7 +116,7 @@ class SettingsActivity : AppCompatActivity() {
                 .show()
         }
 
-        // Toolbar save action (replaces old button)
+        // Toolbar save action
         val toolbar = findViewById<com.google.android.material.appbar.MaterialToolbar>(R.id.toolbar_settings)
         toolbar.inflateMenu(R.menu.menu_settings)
         toolbar.setOnMenuItemClickListener { item ->
@@ -141,6 +143,9 @@ class SettingsActivity : AppCompatActivity() {
             store.removeTwoFASecret()
             syncTwoFASection()
         }
+
+        // Build 2FA section (now in same delayed phase)
+        syncTwoFASection()
     }
 
     private fun performSave() {
@@ -283,7 +288,7 @@ class SettingsActivity : AppCompatActivity() {
         }
         codeView.setOnLongClickListener {
             // Force focus to ensure clipboard service allows access
-            requestFocus()
+            codeView.requestFocus()
             false
         }
 

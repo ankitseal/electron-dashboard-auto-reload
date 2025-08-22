@@ -524,44 +524,36 @@ class MainActivity : AppCompatActivity() {
         val totp = if (twoFAEnabled && has2FA) cfgStore.getTOTPCode() else ""
         val script = """
             (function(){
-                try{
-                    if (window.__DAR_LOGIN_INIT) { try{Native.log('auto:skip-duplicate');}catch(e){}; return; }
-                    window.__DAR_LOGIN_INIT = true;
+                try {
+                    if (window.__DAR_LOGIN_INIT_OPT) return;
+                    window.__DAR_LOGIN_INIT_OPT = true;
                     const EMAIL=${toJsString(email)}; const PASS=${toJsString(pass)}; const USE_2FA=${toJsBool(twoFAEnabled && has2FA)}; const TOTP=${toJsString(totp)};
-                    try{ Native.log('auto:init emailLen=' + EMAIL.length + ' passSet=' + (PASS.length>0) + ' use2FA=' + USE_2FA);}catch(e){}
                     const emailSel=['#username','input[name="loginfmt"]','input[type="email"]','input[name="username"]'];
                     const passSel=['input[name="passwd"]','input[type="password"]','#password'];
                     const twoFASel=['input#code','input[name="code"]','input[autocomplete="one-time-code"]'];
-                    function findAny(ars){ for(const s of ars){ const el=document.querySelector(s); if(el) return el; } return null; }
-                    function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
-                    async function runOnce(){
-                        // removed verbose run log
-                        const emailEl=findAny(emailSel);
-                        if(emailEl && EMAIL){
-                            if(emailEl.value!==EMAIL){ emailEl.focus(); emailEl.value=''; emailEl.dispatchEvent(new Event('input',{bubbles:true})); emailEl.value=EMAIL; emailEl.dispatchEvent(new Event('input',{bubbles:true})); try{Native.log('auto:filled-email');}catch(e){} }
-                        }
-                        let tries=0; while(!findAny(passSel) && tries<20){ await sleep(200); tries++; }
-                        const passEl=findAny(passSel);
-                        if(passEl && PASS){
-                            passEl.focus(); passEl.value=''; passEl.dispatchEvent(new Event('input',{bubbles:true}));
-                            passEl.value=PASS; passEl.dispatchEvent(new Event('input',{bubbles:true})); try{Native.log('auto:filled-pass');}catch(e){}
-                        }
-                        const codeEl=findAny(twoFASel); if(codeEl && USE_2FA && TOTP!==''){
-                            codeEl.focus(); codeEl.value=''; codeEl.dispatchEvent(new Event('input',{bubbles:true}));
-                            codeEl.value=TOTP; codeEl.dispatchEvent(new Event('input',{bubbles:true})); try{Native.log('auto:filled-totp');}catch(e){}
-                        }
-                        return !!(emailEl||passEl||codeEl);
+                    function findAny(list){ for(const s of list){ const el=document.querySelector(s); if(el) return el; } return null; }
+                    function fill(el,val,label){ if(!el||!val) return false; if(el.value===val) return true; el.focus(); el.value=''; el.dispatchEvent(new Event('input',{bubbles:true})); el.value=val; el.dispatchEvent(new Event('input',{bubbles:true})); try{Native.log('auto:f:'+label);}catch(_){} return true; }
+                    function attempt(){
+                        let changed=false;
+                        changed = fill(findAny(emailSel), EMAIL,'e') || changed;
+                        changed = fill(findAny(passSel), PASS,'p') || changed;
+                        if (USE_2FA && TOTP) changed = fill(findAny(twoFASel), TOTP,'t') || changed;
+                        return changed;
                     }
-                    let ticks=0; const max=120; // ~60s
-                    (function loop(){ runOnce().catch(()=>{}).finally(()=>{ ticks++; if(ticks<max) setTimeout(loop, 500); }); })();
-                    window.addEventListener('hashchange', ()=>{ try{Native.log('auto:hashchange');}catch(e){}; ticks=0; });
-                    window.addEventListener('popstate', ()=>{ try{Native.log('auto:popstate');}catch(e){}; ticks=0; });
-                    try {
-                        ['click','keydown','touchstart','mousemove','scroll'].forEach(evt=>{
-                            window.addEventListener(evt, ()=>{ try{Native.interact();}catch(e){} }, {passive:true});
-                        });
-                    } catch(e) { try{Native.log('auto:listener-error '+e.message);}catch(_){} }
-                }catch(e){ try{Native.log('auto:bootstrap-error '+(e&&e.message));}catch(_){} }
+                    // Initial quick attempt
+                    attempt();
+                    // Use a mutation observer instead of 120x polling to lower load
+                    const obs = new MutationObserver(()=>{
+                        if (attempt()) { /* once something filled we can relax */ }
+                    });
+                    try { obs.observe(document.documentElement,{subtree:true,childList:true}); } catch(_){ }
+                    // Safety timeout to disconnect after 30s
+                    setTimeout(()=>{ try{obs.disconnect();}catch(_){ } }, 30000);
+                    ['hashchange','popstate'].forEach(ev=>window.addEventListener(ev, ()=>{ try{attempt();}catch(_){ } }));
+                    try { ['click','keydown','touchstart','mousemove','scroll'].forEach(evt=>{
+                        window.addEventListener(evt, ()=>{ try{Native.interact();}catch(_){ } }, {passive:true});
+                    }); } catch(_){ }
+                } catch(e) { try{Native.log('auto:bootstrap-error '+(e&&e.message));}catch(_){ } }
             })();
         """.trimIndent()
         evalJs(webView, script, null)
