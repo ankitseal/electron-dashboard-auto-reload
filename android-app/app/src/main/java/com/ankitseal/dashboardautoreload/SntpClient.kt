@@ -6,6 +6,10 @@ import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 /**
  * Lightweight SNTP client to get accurate network time without relying on system clock.
@@ -26,6 +30,7 @@ object SntpClient {
     @Volatile private var lastSyncAtMs: Long = 0L
     private val syncing = AtomicBoolean(false)
     private const val TTL_MS: Long = 10 * 60 * 1000 // 10 minutes
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     fun isFresh(): Boolean {
         val last = lastSyncAtMs
@@ -41,9 +46,9 @@ object SntpClient {
     fun ensureSyncAsync() {
         if (isFresh()) return
         if (!syncing.compareAndSet(false, true)) return
-        Thread({
+        scope.launch {
             try { syncNowInternal() } finally { syncing.set(false) }
-        }, "DAR-SNTP").apply { isDaemon = true }.start()
+        }
     }
 
     private fun syncNowInternal(timeoutMs: Int = 800) {

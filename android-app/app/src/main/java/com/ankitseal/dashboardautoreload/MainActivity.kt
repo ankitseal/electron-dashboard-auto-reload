@@ -20,6 +20,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.net.http.SslError
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
 import com.ankitseal.dashboardautoreload.databinding.ActivityMainBinding
 import java.net.URL
 import java.util.*
@@ -66,7 +67,6 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
 
         cfgStore = ConfigStore(this)
-        cfg = cfgStore.load()
 
         try { WebView.setWebContentsDebuggingEnabled(true) } catch (_: Throwable) {}
 
@@ -77,8 +77,6 @@ class MainActivity : AppCompatActivity() {
         binding.fabSettings.setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
-
-        navigateToConfiguredUrl()
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -413,7 +411,7 @@ class MainActivity : AppCompatActivity() {
             if (reloadFireAt < earliest) earliest = reloadFireAt
         }
         if (earliest == Long.MAX_VALUE) { scheduledRunnable = null; return }
-        val delay = (earliest - now).coerceAtLeast(50L)
+        val delay = (earliest - now).coerceAtLeast(250L)
         scheduledRunnable = Runnable { processTimers() }
         mainHandler.postDelayed(scheduledRunnable!!, delay)
     }
@@ -519,10 +517,11 @@ class MainActivity : AppCompatActivity() {
         val email = cfg.user.email
         val pass = cfg.user.password
         val twoFAEnabled = cfg.twoFAEnabled
-        val has2FA = cfgStore.hasTwoFA()
-        if (email.isBlank() && pass.isBlank() && !(twoFAEnabled && has2FA)) return
-        val totp = if (twoFAEnabled && has2FA) cfgStore.getTOTPCode() else ""
-        val script = """
+        lifecycleScope.launch {
+            val has2FA = cfgStore.hasTwoFA()
+            if (email.isBlank() && pass.isBlank() && !(twoFAEnabled && has2FA)) return@launch
+            val totp = if (twoFAEnabled && has2FA) cfgStore.getTOTPCode() else ""
+            val script = """
             (function(){
                 try {
                     if (window.__DAR_LOGIN_INIT_OPT) return;
@@ -556,7 +555,8 @@ class MainActivity : AppCompatActivity() {
                 } catch(e) { try{Native.log('auto:bootstrap-error '+(e&&e.message));}catch(_){ } }
             })();
         """.trimIndent()
-        evalJs(webView, script, null)
+            evalJs(webView, script, null)
+        }
     }
 
     private fun toJsString(s: String): String {
@@ -573,27 +573,31 @@ class MainActivity : AppCompatActivity() {
             recoveryAttemptsInWindow = 0
             recoveryAttemptsWindowStart = 0L
         }
-        cfg = cfgStore.load()
-    try { Log.w(TAG, "onResume: cfg.url='${cfg.url}', reloadAfter=${cfg.reloadAfterSec}, autoReload=${cfg.autoReloadEnabled}") } catch (_: Throwable) {}
-        navigateToConfiguredUrl()
-    startWatchdog()
-    startNavigateBackMonitor()
-    // Initialize auto reload state based on current page (may already be on target)
-    try { findViewById<WebView>(R.id.webview)?.let { evaluateAutoReloadState(it.url ?: "") } } catch (_: Throwable) {}
-    // Touch listener already set in setupWebView; no duplicate here
+        lifecycleScope.launch {
+            cfg = cfgStore.load()
+            try { Log.w(TAG, "onResume: cfg.url='${cfg.url}', reloadAfter=${cfg.reloadAfterSec}, autoReload=${cfg.autoReloadEnabled}") } catch (_: Throwable) {}
+            navigateToConfiguredUrl()
+            startWatchdog()
+            startNavigateBackMonitor()
+            try { findViewById<WebView>(R.id.webview)?.let { evaluateAutoReloadState(it.url ?: "") } } catch (_: Throwable) {}
+        }
+        // Touch listener already set in setupWebView; no duplicate here
     }
 
     override fun onPause() {
         super.onPause()
         isForeground = false
+        watchdogRunnable?.let { mainHandler.removeCallbacks(it) }
     }
 
     private var watchdogRunnable: Runnable? = null
     private fun startWatchdog() {
         watchdogRunnable?.let { mainHandler.removeCallbacks(it) }
+        if (!isForeground || !cfg.timeWindow.enabled) return
         val webView: WebView = findViewById(R.id.webview)
         watchdogRunnable = object : Runnable {
             override fun run() {
+                if (!isForeground || !cfg.timeWindow.enabled) return
                 try {
                     val current = webView.url ?: ""
                     if (cfg.timeWindow.enabled) {
@@ -620,7 +624,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 } catch (_: Throwable) {}
-                mainHandler.postDelayed(this, 5000)
+                if (isForeground && cfg.timeWindow.enabled) mainHandler.postDelayed(this, 5000)
             }
         }
         mainHandler.postDelayed(watchdogRunnable!!, 5000)

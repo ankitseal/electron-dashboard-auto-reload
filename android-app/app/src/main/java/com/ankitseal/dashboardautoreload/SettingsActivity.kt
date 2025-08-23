@@ -16,6 +16,10 @@ import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.google.android.material.textfield.TextInputLayout
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class SettingsActivity : AppCompatActivity() {
     private lateinit var store: ConfigStore
@@ -31,26 +35,27 @@ class SettingsActivity : AppCompatActivity() {
     private fun initializeSettingsUI() {
         if (isFinishing || isDestroyed) return
         store = ConfigStore(this)
-        val cfg = store.load()
+        lifecycleScope.launch {
+            val cfg = store.load()
 
-        // Populate fields
-        findViewById<EditText>(R.id.et_url).setText(cfg.url)
-        val sessionEt = findViewById<EditText>(R.id.et_session)
-        sessionEt.setText(cfg.session)
-        sessionEt.isEnabled = false
-        sessionEt.isFocusable = false
-        findViewById<EditText>(R.id.et_email).setText(cfg.user.email)
-        findViewById<EditText>(R.id.et_password).setText(cfg.user.password)
-        findViewById<EditText>(R.id.et_reload).setText(cfg.reloadAfterSec.toString())
-        findViewById<MaterialSwitch>(R.id.cb_auto).isChecked = cfg.autoReloadEnabled
-        findViewById<EditText>(R.id.et_twstart).setText(cfg.timeWindow.start)
-        findViewById<EditText>(R.id.et_twdur).setText(cfg.timeWindow.duration)
-        val twSwitch = findViewById<MaterialSwitch>(R.id.cb_twenabled)
-        twSwitch.isChecked = cfg.timeWindow.enabled
-        findViewById<MaterialSwitch>(R.id.cb_navback).isChecked = cfg.navigateBackEnabled
-        findViewById<EditText>(R.id.et_tabto).setText(cfg.tabTimeoutSec.toString())
-        findViewById<MaterialSwitch>(R.id.cb_twofa).isChecked = cfg.twoFAEnabled
-        findViewById<EditText>(R.id.et_twofa).isEnabled = true
+            // Populate fields
+            findViewById<EditText>(R.id.et_url).setText(cfg.url)
+            val sessionEt = findViewById<EditText>(R.id.et_session)
+            sessionEt.setText(cfg.session)
+            sessionEt.isEnabled = false
+            sessionEt.isFocusable = false
+            findViewById<EditText>(R.id.et_email).setText(cfg.user.email)
+            findViewById<EditText>(R.id.et_password).setText(cfg.user.password)
+            findViewById<EditText>(R.id.et_reload).setText(cfg.reloadAfterSec.toString())
+            findViewById<MaterialSwitch>(R.id.cb_auto).isChecked = cfg.autoReloadEnabled
+            findViewById<EditText>(R.id.et_twstart).setText(cfg.timeWindow.start)
+            findViewById<EditText>(R.id.et_twdur).setText(cfg.timeWindow.duration)
+            val twSwitch = findViewById<MaterialSwitch>(R.id.cb_twenabled)
+            twSwitch.isChecked = cfg.timeWindow.enabled
+            findViewById<MaterialSwitch>(R.id.cb_navback).isChecked = cfg.navigateBackEnabled
+            findViewById<EditText>(R.id.et_tabto).setText(cfg.tabTimeoutSec.toString())
+            findViewById<MaterialSwitch>(R.id.cb_twofa).isChecked = cfg.twoFAEnabled
+            findViewById<EditText>(R.id.et_twofa).isEnabled = true
 
         // Dynamic enable/disable for dependent numeric fields
         fun updateFieldStates() {
@@ -131,114 +136,103 @@ class SettingsActivity : AppCompatActivity() {
             if (secret.isBlank()) {
                 Toast.makeText(this, "Secret required", Toast.LENGTH_SHORT).show()
             } else {
-                store.registerTwoFA(secret)
-                findViewById<EditText>(R.id.et_twofa).setText("")
-                findViewById<MaterialSwitch>(R.id.cb_twofa).isChecked = true
-                Toast.makeText(this, "2FA key registered", Toast.LENGTH_SHORT).show()
-                syncTwoFASection()
+                lifecycleScope.launch {
+                    store.registerTwoFA(secret)
+                    findViewById<EditText>(R.id.et_twofa).setText("")
+                    findViewById<MaterialSwitch>(R.id.cb_twofa).isChecked = true
+                    Toast.makeText(this@SettingsActivity, "2FA key registered", Toast.LENGTH_SHORT).show()
+                    syncTwoFASection()
+                }
             }
         }
         // 2FA remove button
         findViewById<Button>(R.id.btn_twofa_remove).setOnClickListener {
-            store.removeTwoFASecret()
-            syncTwoFASection()
+            lifecycleScope.launch {
+                store.removeTwoFASecret()
+                syncTwoFASection()
+            }
         }
 
         // Build 2FA section (now in same delayed phase)
         syncTwoFASection()
+        }
     }
 
     private fun performSave() {
-        val urlEt = findViewById<EditText>(R.id.et_url)
-        val emailEt = findViewById<EditText>(R.id.et_email)
-        val passEt = findViewById<EditText>(R.id.et_password)
-        val reloadEt = findViewById<EditText>(R.id.et_reload)
-        val tabTimeoutEt = findViewById<EditText>(R.id.et_tabto)
-        val twStartEt = findViewById<EditText>(R.id.et_twstart)
-        val twDurEt = findViewById<EditText>(R.id.et_twdur)
+        lifecycleScope.launch {
+            val urlEt = findViewById<EditText>(R.id.et_url)
+            val emailEt = findViewById<EditText>(R.id.et_email)
+            val passEt = findViewById<EditText>(R.id.et_password)
+            val reloadEt = findViewById<EditText>(R.id.et_reload)
+            val tabTimeoutEt = findViewById<EditText>(R.id.et_tabto)
+            val twStartEt = findViewById<EditText>(R.id.et_twstart)
+            val twDurEt = findViewById<EditText>(R.id.et_twdur)
 
-        // Basic required validation
-        var hasError = false
-        fun parentLayout(et: EditText): TextInputLayout? = (et.parent?.parent as? TextInputLayout)
-        fun setErr(et: EditText, msg: String?) {
-            val til = parentLayout(et)
-            if (til != null) til.error = msg else et.error = msg
-        }
-        fun clearErr(et: EditText) = setErr(et, null)
-        fun req(et: EditText, name: String, minLen: Int = 1) {
-            if (et.text.toString().trim().length < minLen) {
-                setErr(et, "$name required"); hasError = true
-            } else clearErr(et)
-        }
-        fun reqPositive(et: EditText, name: String) {
-            val n = et.text.toString().trim().toIntOrNull()
-            if (n == null || n <= 0) { setErr(et, "$name must be > 0"); hasError = true } else clearErr(et)
-        }
-        req(urlEt, "URL")
-        // email/password optional; only validate reload & tab timeout when enabled
-        val autoOn = findViewById<MaterialSwitch>(R.id.cb_auto).isChecked
-        val navOn = findViewById<MaterialSwitch>(R.id.cb_navback).isChecked
-        if (autoOn) { req(reloadEt, "Reload"); reqPositive(reloadEt, "Reload") }
-        if (navOn) { req(tabTimeoutEt, "Inactivity"); reqPositive(tabTimeoutEt, "Inactivity") }
-        val twOn = findViewById<MaterialSwitch>(R.id.cb_twenabled).isChecked
-        if (twOn) {
-            req(twStartEt, "Start")
-            req(twDurEt, "Duration")
-        }
-        if (hasError) {
-            Toast.makeText(this, "Fix highlighted fields", Toast.LENGTH_SHORT).show()
-            return
-        }
+            var hasError = false
+            fun parentLayout(et: EditText): TextInputLayout? = (et.parent?.parent as? TextInputLayout)
+            fun setErr(et: EditText, msg: String?) { val til = parentLayout(et); if (til != null) til.error = msg else et.error = msg }
+            fun clearErr(et: EditText) = setErr(et, null)
+            fun req(et: EditText, name: String, minLen: Int = 1) { if (et.text.toString().trim().length < minLen) { setErr(et, "$name required"); hasError = true } else clearErr(et) }
+            fun reqPositive(et: EditText, name: String) { val n = et.text.toString().trim().toIntOrNull(); if (n == null || n <= 0) { setErr(et, "$name must be > 0"); hasError = true } else clearErr(et) }
 
-        val cfgOld = store.load()
-        val oldUrl = cfgOld.url.trim()
-        val urlStrRaw = urlEt.text.toString()
-        val urlStr = urlStrRaw.trim()
-        val session = cfgOld.session // session field disabled & auto-managed
-
-        val newCfg = ConfigStore.Config(
-            url = urlStr,
-            session = session,
-            reloadAfterSec = reloadEt.text.toString().toIntOrNull() ?: 0,
-            user = ConfigStore.User(
-                email = emailEt.text.toString(),
-                password = passEt.text.toString()
-            ),
-            timeWindow = ConfigStore.TimeWindow(
-                enabled = twOn,
-                start = twStartEt.text.toString().ifBlank { "12:00" },
-                duration = twDurEt.text.toString().ifBlank { "1d" }
-            ),
-            autoReloadEnabled = autoOn,
-            navigateBackEnabled = navOn,
-            tabTimeoutSec = tabTimeoutEt.text.toString().toIntOrNull() ?: 0,
-            twoFAEnabled = findViewById<MaterialSwitch>(R.id.cb_twofa).isChecked,
-            hasTwoFASecret = store.hasTwoFA()
-        )
-        if (newCfg.timeWindow.enabled && newCfg.autoReloadEnabled) {
-            val durSec = when (newCfg.timeWindow.duration) {
-                "1h"->3600;"2h"->7200;"6h"->21600;"12h"->43200;"1d"->86400;"2d"->172800;"5d"->432000;"7d"->604800
-                else -> newCfg.timeWindow.duration.filter { it.isDigit() }.toIntOrNull()?.times(3600) ?: 86400
+            req(urlEt, "URL")
+            val autoOn = findViewById<MaterialSwitch>(R.id.cb_auto).isChecked
+            val navOn = findViewById<MaterialSwitch>(R.id.cb_navback).isChecked
+            if (autoOn) { req(reloadEt, "Reload"); reqPositive(reloadEt, "Reload") }
+            if (navOn) { req(tabTimeoutEt, "Inactivity"); reqPositive(tabTimeoutEt, "Inactivity") }
+            val twOn = findViewById<MaterialSwitch>(R.id.cb_twenabled).isChecked
+            if (twOn) { req(twStartEt, "Start"); req(twDurEt, "Duration") }
+            if (hasError) {
+                Toast.makeText(this@SettingsActivity, "Fix highlighted fields", Toast.LENGTH_SHORT).show()
+                return@launch
             }
-            if (newCfg.reloadAfterSec >= durSec) newCfg.reloadAfterSec = (durSec - 1).coerceAtLeast(1)
-        }
-    // Already validated >0 when enabled; no silent correction
 
-        val urlChanged = oldUrl.isNotBlank() && oldUrl != newCfg.url && newCfg.url.isNotBlank()
-        if (urlChanged) {
-            newCfg.session = ""
-            try {
-                val webviewDir = getDir("app_webview", Context.MODE_PRIVATE)
-                webviewDir.deleteRecursively()
-                android.webkit.WebStorage.getInstance().deleteAllData()
-                android.webkit.CookieManager.getInstance().removeAllCookies(null)
-                android.webkit.CookieManager.getInstance().flush()
-                Log.w(TAG, "urlChanged: cleared webview data & session")
-            } catch (_: Throwable) {}
+            val cfgOld = store.load()
+            val oldUrl = cfgOld.url.trim()
+            val urlStr = urlEt.text.toString().trim()
+            val session = cfgOld.session
+            val newCfg = ConfigStore.Config(
+                url = urlStr,
+                session = session,
+                reloadAfterSec = reloadEt.text.toString().toIntOrNull() ?: 0,
+                user = ConfigStore.User(
+                    email = emailEt.text.toString().trim(),
+                    password = passEt.text.toString().trim()
+                ),
+                timeWindow = ConfigStore.TimeWindow(
+                    enabled = twOn,
+                    start = twStartEt.text.toString().ifBlank { "12:00" },
+                    duration = twDurEt.text.toString().ifBlank { "1d" }
+                ),
+                autoReloadEnabled = autoOn,
+                navigateBackEnabled = navOn,
+                tabTimeoutSec = tabTimeoutEt.text.toString().toIntOrNull() ?: 0,
+                twoFAEnabled = findViewById<MaterialSwitch>(R.id.cb_twofa).isChecked,
+                hasTwoFASecret = store.hasTwoFA()
+            )
+            if (newCfg.timeWindow.enabled && newCfg.autoReloadEnabled) {
+                val durSec = when (newCfg.timeWindow.duration) {
+                    "1h"->3600;"2h"->7200;"6h"->21600;"12h"->43200;"1d"->86400;"2d"->172800;"5d"->432000;"7d"->604800
+                    else -> newCfg.timeWindow.duration.filter { it.isDigit() }.toIntOrNull()?.times(3600) ?: 86400
+                }
+                if (newCfg.reloadAfterSec >= durSec) newCfg.reloadAfterSec = (durSec - 1).coerceAtLeast(1)
+            }
+            val urlChanged = oldUrl.isNotBlank() && oldUrl != newCfg.url && newCfg.url.isNotBlank()
+            if (urlChanged) {
+                newCfg.session = ""
+                try {
+                    val webviewDir = getDir("app_webview", Context.MODE_PRIVATE)
+                    webviewDir.deleteRecursively()
+                    android.webkit.WebStorage.getInstance().deleteAllData()
+                    android.webkit.CookieManager.getInstance().removeAllCookies(null)
+                    android.webkit.CookieManager.getInstance().flush()
+                    Log.w(TAG, "urlChanged: cleared webview data & session")
+                } catch (_: Throwable) {}
+            }
+            store.save(newCfg)
+            Toast.makeText(this@SettingsActivity, "Saved", Toast.LENGTH_SHORT).show()
+            finish()
         }
-        store.save(newCfg)
-        Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show()
-        finish()
     }
 
     private var totpHandler: Handler? = null
@@ -247,6 +241,7 @@ class SettingsActivity : AppCompatActivity() {
     private var lastTotpRenderedSecond: Int = -1
 
     private fun syncTwoFASection() {
+        lifecycleScope.launch {
         val hasSecret = store.hasTwoFA()
         val enabled = store.load().twoFAEnabled
     // reduced logging
@@ -297,7 +292,7 @@ class SettingsActivity : AppCompatActivity() {
             if (totpHandler == null) totpHandler = Handler(Looper.getMainLooper())
             val handler = totpHandler!!
             totpRunnable?.let { handler.removeCallbacks(it) }
-        cachedTotpSecret = store.getTwoFASecret()
+            cachedTotpSecret = withContext(Dispatchers.IO) { store.getTwoFASecret() }
             totpRunnable = object : Runnable {
                 override fun run() {
                     val step = 30
@@ -308,7 +303,7 @@ class SettingsActivity : AppCompatActivity() {
                     if (nowSec != lastTotpRenderedSecond) {
                         lastTotpRenderedSecond = nowSec
                         try {
-                            val secret = cachedTotpSecret ?: store.getTwoFASecret()
+                            val secret = cachedTotpSecret ?: ""
                             val code = store.getTOTPCodeFromSecret(secret)
                             codeView.text = if (code.isNotBlank()) code else "—"
                         } catch (_: Throwable) { codeView.text = "—" }
@@ -320,6 +315,17 @@ class SettingsActivity : AppCompatActivity() {
         } else {
             totpHandler?.let { h -> totpRunnable?.let { h.removeCallbacks(it) } }
         }
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (::store.isInitialized) syncTwoFASection()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        totpHandler?.let { h -> totpRunnable?.let { h.removeCallbacks(it) } }
     }
 
     override fun onDestroy() {

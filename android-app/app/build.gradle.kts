@@ -51,6 +51,9 @@ dependencies {
 
     // WebKit for modern WebView features
     implementation("androidx.webkit:webkit:1.11.0")
+    // Lifecycle + coroutines for background work
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.5")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
