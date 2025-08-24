@@ -21,6 +21,7 @@ import android.webkit.WebViewClient
 import android.net.http.SslError
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import com.ankitseal.dashboardautoreload.databinding.ActivityMainBinding
 import java.net.URL
 import java.util.*
@@ -681,7 +682,8 @@ class MainActivity : AppCompatActivity() {
             val sess = parts.firstOrNull { it.trim().startsWith("SESSION=") }?.trim()?.removePrefix("SESSION=") ?: return
             if (sess.isNotBlank() && sess != cfg.session) {
                 val updated = cfg.copy(session = sess)
-                cfgStore.save(updated)
+                // persist asynchronously so we don't block UI thread
+                lifecycleScope.launch { cfgStore.save(updated) }
                 cfg = updated
             }
         } catch (_: Throwable) {}

@@ -103,7 +103,7 @@ class SettingsActivity : AppCompatActivity() {
             val cur = twStartEt.text.toString().split(":")
             val h = cur.getOrNull(0)?.toIntOrNull() ?: 12
             val m = cur.getOrNull(1)?.toIntOrNull() ?: 0
-            val dlg = android.app.TimePickerDialog(this, { _, hh, mm ->
+            val dlg = android.app.TimePickerDialog(this@SettingsActivity, { _, hh, mm ->
                 twStartEt.setText(String.format("%02d:%02d", hh, mm))
             }, h, m, true)
             dlg.show()
@@ -112,7 +112,7 @@ class SettingsActivity : AppCompatActivity() {
         // Duration dropdown via simple dialog
         val durations = arrayOf("1h","2h","6h","12h","1d","2d","5d","7d")
         twDurEt.setOnClickListener {
-            AlertDialog.Builder(this)
+            AlertDialog.Builder(this@SettingsActivity)
                 .setTitle("Select duration")
                 .setItems(durations) { d, which ->
                     twDurEt.setText(durations[which])
@@ -134,7 +134,7 @@ class SettingsActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btn_twofa_register).setOnClickListener {
             val secret = findViewById<EditText>(R.id.et_twofa).text.toString().trim()
             if (secret.isBlank()) {
-                Toast.makeText(this, "Secret required", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@SettingsActivity, "Secret required", Toast.LENGTH_SHORT).show()
             } else {
                 lifecycleScope.launch {
                     store.registerTwoFA(secret)
@@ -277,7 +277,7 @@ class SettingsActivity : AppCompatActivity() {
                 if (code.length >= 4) { // basic sanity
                     val clip = ClipData.newPlainText("TOTP", code)
                     cm.setPrimaryClip(clip)
-                    Toast.makeText(this, "Copied", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@SettingsActivity, "Copied", Toast.LENGTH_SHORT).show()
                 }
             } catch (_: Throwable) {}
         }
