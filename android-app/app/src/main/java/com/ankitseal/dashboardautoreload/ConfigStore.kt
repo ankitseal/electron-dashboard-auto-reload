@@ -11,6 +11,8 @@ import javax.crypto.Mac
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** Simple JSON-backed config compatible with the Electron app's config.json keys. */
 class ConfigStore(private val context: Context) {
@@ -94,16 +96,16 @@ class ConfigStore(private val context: Context) {
         } catch (_: Throwable) { null }
     }
 
-    fun load(): Config {
+    suspend fun load(): Config = withContext(Dispatchers.IO) {
         val f = configFile()
         if (!f.exists()) {
             try { Log.w(TAG, "load: no config file at ${f.absolutePath}") } catch (_: Throwable) {}
-            return Config()
+            return@withContext Config()
         }
-    val mtime = f.lastModified()
-    val cached = cachedConfig
-    if (cached != null && mtime == cachedConfigMtime) return cached
-        return try {
+        val mtime = f.lastModified()
+        val cached = cachedConfig
+        if (cached != null && mtime == cachedConfigMtime) return@withContext cached
+        try {
             val txt = f.readText()
             try { Log.w(TAG, "load: read ${txt.length} bytes from ${f.absolutePath}") } catch (_: Throwable) {}
             val o = JSONObject(txt)
@@ -132,25 +134,21 @@ class ConfigStore(private val context: Context) {
             cfg.tabTimeoutSec = o.optInt("tabTimeoutSec", 600)
             cfg.twoFAEnabled = o.optBoolean("twoFAEnabled", false)
             cfg.hasTwoFASecret = o.has("twoFAEnc")
-            // Prime cache lazily only when needed
-            // reduced logging
             cachedConfig = cfg
             cachedConfigMtime = mtime
             cfg
         } catch (_: Throwable) {
-            // silent fallback
             Config()
         }
     }
 
-    fun save(cfg: Config) {
+    suspend fun save(cfg: Config) = withContext(Dispatchers.IO) {
         val f = configFile()
-        // Start from existing file to preserve encrypted blobs when not touched
         val existing = try { if (configFile().exists()) JSONObject(configFile().readText()) else JSONObject() } catch (_: Throwable) { JSONObject() }
         val o = JSONObject()
         o.put("url", cfg.url)
         o.put("session", cfg.session)
-    o.put("reloadAfterSec", cfg.reloadAfterSec)
+        o.put("reloadAfterSec", cfg.reloadAfterSec)
         val hasUser = cfg.user.email.isNotBlank() || cfg.user.password.isNotBlank()
         if (hasUser) {
             encryptJson(JSONObject().apply {
@@ -158,7 +156,6 @@ class ConfigStore(private val context: Context) {
                 put("password", cfg.user.password)
             })?.let { o.put("userEnc", it) }
         } else if (existing.has("userEnc")) {
-            // preserve prior encrypted creds if present and user fields empty
             o.put("userEnc", existing.getJSONObject("userEnc"))
         }
         val tw = JSONObject()
@@ -170,39 +167,34 @@ class ConfigStore(private val context: Context) {
         o.put("navigateBackEnabled", cfg.navigateBackEnabled)
         o.put("tabTimeoutSec", cfg.tabTimeoutSec)
         o.put("twoFAEnabled", cfg.twoFAEnabled)
-        // Preserve twoFAEnc unless removed explicitly via removeTwoFASecret()
         if (existing.has("twoFAEnc")) o.put("twoFAEnc", existing.getJSONObject("twoFAEnc"))
         val json = o.toString(2)
         f.writeText(json)
-    // silent save
     }
 
-    fun registerTwoFA(secretRaw: String) {
-        // Mirror Electron: accept otpauth:// or Base32; persist only the secret
+    suspend fun registerTwoFA(secretRaw: String) = withContext(Dispatchers.IO) {
         val secret = extractBase32Secret(secretRaw)
-        if (secret.isBlank()) return
-    // silent
+        if (secret.isBlank()) return@withContext
         val existing = try { if (configFile().exists()) JSONObject(configFile().readText()) else JSONObject() } catch (_: Throwable) { JSONObject() }
         encryptJson(JSONObject().apply { put("secret", secret) })?.let { enc ->
             existing.put("twoFAEnc", enc)
             existing.put("twoFAEnabled", true)
             configFile().writeText(existing.toString(2))
             cachedTwoFASecret = secret
-            cachedConfig = null // invalidate so next load re-parses flags
+            cachedConfig = null
             try { Log.w(TAG, "registerTwoFA: saved twoFAEnc; file=${configFile().absolutePath}") } catch (_: Throwable) {}
         }
     }
 
-    fun removeTwoFASecret() {
+    suspend fun removeTwoFASecret() = withContext(Dispatchers.IO) {
         val existing = try { if (configFile().exists()) JSONObject(configFile().readText()) else JSONObject() } catch (_: Throwable) { JSONObject() }
         existing.remove("twoFAEnc")
         configFile().writeText(existing.toString(2))
-    cachedTwoFASecret = null
-    cachedConfig = null
-    // silent
+        cachedTwoFASecret = null
+        cachedConfig = null
     }
 
-    fun hasTwoFA(): Boolean = getTwoFASecret().isNotBlank()
+    suspend fun hasTwoFA(): Boolean = withContext(Dispatchers.IO) { getTwoFASecret().isNotBlank() }
 
     fun getTwoFASecret(): String {
         cachedTwoFASecret?.let { return it }
@@ -215,10 +207,9 @@ class ConfigStore(private val context: Context) {
         return secret
     }
 
-    fun getTOTPCode(): String {
+    suspend fun getTOTPCode(): String = withContext(Dispatchers.IO) {
         val secret = getTwoFASecret()
-        if (secret.isBlank()) return ""
-        return generateTOTP(secret, 30, 6)
+        if (secret.isBlank()) "" else generateTOTP(secret, 30, 6)
     }
 
     fun getTOTPCodeFromSecret(secret: String): String = if (secret.isBlank()) "" else generateTOTP(secret,30,6)
