@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Data extraction (cloud backup + device transfer) rules for Android 12 (API 31) and above.
+    Reference: https://developer.android.com/about/versions/12/backup-restore
+    Adjust include/exclude elements to fine-tune what user data is backed up.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- Exclude everything to mirror legacy allowBackup=false -->
+        <exclude domain="root" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+    </device-transfer>
+</data-extraction-rules>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Backup rules for devices < Android 12 (S) using the legacy full data backup system
+    Reference: https://developer.android.com/guide/topics/data/autobackup
+    Currently we exclude caches / temp files (adjust as needed).
+-->
+<full-backup-content>
+    <!-- Exclude everything (legacy equivalent of allowBackup=false) -->
+    <exclude domain="root" path="." />
+</full-backup-content>

@@ -28,6 +28,13 @@ class SettingsActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_settings)
+        // Footer version/build info
+        try {
+            val p = packageManager.getPackageInfo(packageName, 0)
+            val verName = p.versionName ?: ""
+            val verCode = try { @Suppress("DEPRECATION") p.longVersionCode } catch (_: Throwable) { 0L }
+            findViewById<TextView>(R.id.tv_version)?.text = "v$verName ($verCode)"
+        } catch (_: Throwable) { }
         // Defer heavier config load & view wiring until after first frame to reduce SurfaceSyncGroup timeout risk
         window.decorView.post { initializeSettingsUI() }
     }

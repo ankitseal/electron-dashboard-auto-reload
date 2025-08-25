@@ -1,8 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Hardened network security config.
+     Global cleartext disabled; only allow cleartext for localhost/emulator if needed via specific domain-config.
+     Adjust or remove domain-config entries below if not required. -->
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true">
+    <!-- Default: disallow cleartext, trust system certs only. -->
+    <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>
     </base-config>
+
+    <!-- Optional development exceptions (remove in production if not needed). -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">10.0.2.2</domain> <!-- Android emulator host loopback -->
+    </domain-config>
 </network-security-config>

@@ -2,4 +2,33 @@
 <resources>
     <string name="app_name">Dashboard Auto Reload</string>
     <string name="action_settings">Settings</string>
+    <string name="action_save">Save</string>
+    <!-- Settings screen labels -->
+    <string name="label_target_section">Target</string>
+    <string name="label_target">URL</string>
+    <string name="label_session_auto">SESSION (auto-captured)</string>
+    <string name="label_login_section">Login</string>
+    <string name="label_email">Email</string>
+    <string name="label_password">Password</string>
+    <string name="label_auto_refresh_section">Auto Refresh</string>
+    <string name="label_auto_refresh_toggle">Auto refresh</string>
+    <string name="label_reload_after">Reload After (sec)</string>
+    <string name="label_rolling_window_section">Rolling Window</string>
+    <string name="label_enable_rolling_window">Enable rolling window</string>
+    <string name="label_daily_start">Daily start</string>
+    <string name="label_duration">Duration</string>
+    <string name="hint_twstart">12:00</string>
+    <string name="hint_twdur">1d</string>
+    <string name="label_navigation_section">Navigation</string>
+    <string name="label_nav_back_toggle">Navigate back to default URL</string>
+    <string name="label_return_default_after">Return to default after inactivity (sec)</string>
+    <string name="label_twofa_section">Two-Factor Authentication (TOTP)</string>
+    <string name="label_twofa_toggle">Enable 2FA autofill during login</string>
+    <string name="label_twofa_status_registered">Registered</string>
+    <string name="label_twofa_secret_label">Secret Key (paste base32 or otpauth URI)</string>
+    <string name="hint_twofa_secret">JBSWY3DPEHPK3PXP or otpauth://…</string>
+    <string name="btn_twofa_register">Register</string>
+    <string name="btn_twofa_remove">Remove Key</string>
+    <string name="label_current_code">Current Code</string>
+    <string name="placeholder_totp_code">—</string>
 </resources>

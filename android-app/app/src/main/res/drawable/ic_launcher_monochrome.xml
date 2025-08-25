@@ -7,10 +7,10 @@
 
     <!-- Fit artwork inside the ~72×72 safe zone -->
     <group
-        android:translateX="14"
-        android:translateY="14"
-        android:scaleX="0.82"
-        android:scaleY="0.82">
+        android:translateX="20"
+        android:translateY="20"
+        android:scaleX="0.86"
+        android:scaleY="0.86">
 
         <!-- Monitor outer frame -->
         <path
@@ -24,24 +24,23 @@
             android:pathData="M10,18h60v28H10z" />
 
         <!-- Bar chart (left) -->
-        <path android:fillColor="#000000" android:pathData="M18,44h6V30h-6z" />
-        <path android:fillColor="#000000" android:pathData="M28,44h6V24h-6z" />
-        <path android:fillColor="#000000" android:pathData="M38,44h6V20h-6z" />
+        <path android:fillColor="#00000096" android:pathData="M18,44h6V30h-6z" />
+        <path android:fillColor="#00000096" android:pathData="M28,44h6V24h-6z" />
+        <path android:fillColor="#00000096" android:pathData="M38,44h6V20h-6z" />
 
-        <!-- Pie chart (top-right) -->
-        <path android:fillColor="#8C5BFF" android:pathData="M54,22a12,12 0 0 1 12,12h-12V22z" />
-        <path android:fillColor="#8C5BFF" android:fillAlpha="0.55"
-            android:pathData="M52,22v14h14a14,14 0 0 1 -14,14 14,14 0 0 1 -14,-14 14,14 0 0 1 14,-14z" />
+        <!-- Pie chart (top-right) simplified to solid for monochrome -->
+        <path android:fillColor="#00000096" android:pathData="M52,22a14,14 0 0 1 14,14h-14V22z" />
+        <path android:fillColor="#00000096" android:pathData="M52,22v14h14a14,14 0 0 1 -14,14 14,14 0 0 1 -14,-14 14,14 0 0 1 14,-14z" />
 
-        <!-- Trend line (down then up) -->
+        <!-- Trend line (down then up) unified color -->
         <path
-            android:fillColor="#00000000"
-            android:strokeColor="#8C5BFF"
+            android:fillColor="#00000096"
+            android:strokeColor="#00000096"
             android:strokeWidth="3"
             android:strokeLineJoin="round"
             android:strokeLineCap="round"
             android:pathData="M20,50l10,-8 6,6 9,-11" />
-        <path android:fillColor="#8C5BFF" android:pathData="M47,32l6,0 -3,-6 -3,6z" />
+        <path android:fillColor="#000000" android:pathData="M47,32l6,0 -3,-6 -3,6z" />
 
         <!-- Stand -->
         <path
