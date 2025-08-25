@@ -6,35 +6,96 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Settings</title>
   <style>
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 16px; }
-    fieldset { margin-bottom: 16px; }
-    label { display: block; margin: 6px 0 2px; font-weight: 600; }
-  input[type=text], input[type=password], input[type=number], select { width: 100%; padding: 8px; box-sizing: border-box; }
-    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .actions { display: flex; gap: 8px; justify-content: flex-end; }
-    button { padding: 8px 12px; }
-  .status { margin-top: 8px; height: 1.2em; color: #0a0; }
-  .status.error { color: #a00; }
-  .toggle { display: inline-flex; align-items: center; gap: 8px; }
-  .pwd { display:flex; gap:6px; align-items:center; }
-  .help { font-weight: normal; color: #666; cursor: help; display:inline-block; margin-left:6px; border:1px solid #ccc; border-radius:50%; width:18px; height:18px; line-height:16px; text-align:center; font-size:12px; }
-  .helptext { color:#555; font-size: 12px; line-height:1.4; display:block; margin-top:6px; white-space: normal; word-break: break-word; }
-  /* TOTP ring */
-  .totp-row { display:flex; align-items:center; gap:12px; }
-  #totpRing { width: 24px; height: 24px; border-radius: 50%; background: conic-gradient(#4caf50 var(--deg,0deg), #e0e0e0 0deg); transition: background 0.2s linear; border:1px solid #ddd; }
-  #twoFASetup { margin-top: 8px; }
-  #twoFARegistered { display:none; align-items:center; gap:8px; }
+    :root {
+      --bg: #f5f7fa;
+      --bg-alt: #ffffff;
+      --border: #dce2eb;
+      --border-strong: #c3ccd7;
+      --text: #1f2933;
+      --text-soft: #5a6b7b;
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
+      --danger: #b91c1c;
+      --radius: 10px;
+      --focus: 0 0 0 3px rgba(37,99,235,0.35);
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.08);
+      --shadow: 0 4px 12px rgba(0,0,0,0.08);
+      --gradient: linear-gradient(92deg,#2563eb,#4f46e5 55%, #9333ea);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111827;
+        --bg-alt: #1f2937;
+        --border: #2d3a4a;
+        --border-strong: #435467;
+        --text: #f3f4f6;
+        --text-soft: #9ca3af;
+        --accent: #3b82f6;
+        --accent-hover: #1d4ed8;
+        --danger: #f87171;
+        --gradient: linear-gradient(92deg,#3b82f6,#6366f1 55%, #8b5cf6);
+        --shadow: 0 4px 16px rgba(0,0,0,0.55);
+      }
+    }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; margin:0; background: var(--bg); color: var(--text); -webkit-font-smoothing: antialiased; }
+    h2 { margin:0; font-size: 18px; font-weight:600; letter-spacing:.5px; }
+    #topBar { position: sticky; top:0; z-index:200; display:flex; align-items:center; justify-content:space-between; gap:24px; padding:14px 20px; background: var(--gradient); color:#fff; box-shadow: var(--shadow); }
+    #topBar .meta { display:flex; align-items:center; gap:14px; font-size: 12px; opacity:.9; }
+    #topBar button { background: rgba(255,255,255,0.15); color:#fff; border:1px solid rgba(255,255,255,0.3); padding:8px 18px; font-size:13px; letter-spacing:.5px; text-transform:uppercase; border-radius: 30px; font-weight:600; cursor:pointer; backdrop-filter: blur(3px); transition: background .18s,border-color .18s, transform .15s; }
+    #topBar button:hover { background: rgba(255,255,255,0.28); }
+    #topBar button:active { transform: translateY(1px) scale(.98); }
+    #topBar button:focus-visible { outline:none; box-shadow:0 0 0 3px rgba(255,255,255,.5); }
+    #layout { max-width: 980px; margin: 28px auto 64px; padding:0 28px 56px; }
+    fieldset { margin:0 0 28px; border:1px solid var(--border); padding:18px 20px 20px; border-radius: var(--radius); position:relative; background: var(--bg-alt); box-shadow: var(--shadow-sm); }
+    fieldset:hover { border-color: var(--border-strong); }
+    legend { padding:0 10px; font-size:13px; font-weight:600; letter-spacing:.5px; text-transform:uppercase; color: var(--text-soft); }
+    label { display:block; margin:8px 0 4px; font-weight:600; font-size:13px; letter-spacing:.25px; }
+    input[type=text], input[type=password], input[type=number], select { width:100%; padding:10px 12px; font: 14px/1.3 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; border:1px solid var(--border); border-radius:8px; background: var(--bg-alt); color: var(--text); box-shadow: inset 0 1px 2px rgba(0,0,0,0.05); transition:border-color .15s, background .25s; }
+    input:focus, select:focus { outline:none; border-color: var(--accent); box-shadow: var(--focus); }
+    .row { display:grid; gap:18px; grid-template-columns: repeat(auto-fit,minmax(240px,1fr)); }
+    .toggle { display:inline-flex; align-items:center; gap:10px; font-weight:600; }
+    .pwd { display:flex; gap:8px; align-items:center; }
+    .pwd button { flex:0 0 auto; background: var(--accent); color:#fff; border:none; padding:8px 10px; border-radius:8px; cursor:pointer; font-size:14px; line-height:1; display:flex; align-items:center; justify-content:center; }
+    .pwd button:hover { background: var(--accent-hover); }
+    .help { font-weight:600; color: var(--accent); cursor:help; display:inline-flex; align-items:center; justify-content:center; margin-left:6px; border:1px solid var(--accent); background: rgba(37,99,235,0.07); border-radius:50%; width:18px; height:18px; line-height:16px; text-align:center; font-size:11px; }
+    .helptext { color: var(--text-soft); font-size:12px; line-height:1.4; margin-top:6px; }
+    .status { margin-top:8px; min-height:1.2em; font-size:13px; font-weight:500; color: var(--accent); transition: opacity .3s; }
+    .status.error { color: var(--danger); }
+    .totp-row { display:flex; align-items:center; gap:14px; }
+    #totpRing { width:28px; height:28px; border-radius:50%; background: conic-gradient(var(--accent) var(--deg,0deg), #e0e0e0 0deg); transition: background .2s linear; border:2px solid var(--border); box-shadow: inset 0 0 0 2px var(--bg-alt); }
+    #twoFASetup { margin-top:8px; }
+    #twoFARegistered { display:none; align-items:center; gap:10px; }
+    #twoFARegistered button, #twoFARegister { background: var(--accent); color:#fff; border:none; padding:6px 14px; font-size:13px; border-radius:8px; cursor:pointer; font-weight:500; }
+    #twoFARegistered button:hover, #twoFARegister:hover { background: var(--accent-hover); }
+    #twoFARemove { background: var(--danger); }
+    #twoFARemove:hover { filter: brightness(.9); }
+    #preview { background: linear-gradient(135deg,var(--bg-alt),rgba(255,255,255,0.6)); border:1px solid var(--border); padding:10px 12px; border-radius:8px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 1px 1px rgba(0,0,0,0.05); }
+    #footerNote { max-width:980px; margin:0 auto 32px; padding:0 28px; font-size:12px; color: var(--text-soft); text-align:right; }
+    .toast { position:fixed; bottom:18px; right:20px; background: var(--accent); color:#fff; padding:10px 14px; border-radius:8px; font-size:13px; font-weight:500; box-shadow: var(--shadow); opacity:0; transform: translateY(6px); pointer-events:none; transition: opacity .28s, transform .28s; }
+    .toast.show { opacity:1; transform: translateY(0); }
+    a { color: var(--accent); text-decoration:none; }
+    a:hover { text-decoration:underline; }
   </style>
 </head>
 <body>
-  <h2>Settings</h2>
+  <div id="topBar">
+    <div style="display:flex; flex-direction:column; gap:2px;">
+      <h2>Dashboard Settings</h2>
+      <div class="meta"><span id="appVersion">Version —</span><span id="status" class="status"></span></div>
+    </div>
+    <div style="display:flex; gap:10px; align-items:center;">
+      <button type="button" id="saveBtn" onclick="document.getElementById('cfg').requestSubmit()" title="Save settings (Ctrl+S)">Save</button>
+    </div>
+  </div>
+  <div id="layout">
   <form id="cfg">
     <fieldset>
       <legend>Target</legend>
       <label>URL</label>
       <input id="url" type="text" placeholder="https://..." />
-      <label>SESSION</label>
-      <input id="session" type="text" placeholder="optional" />
+  <label>SESSION <span class="help" title="Managed automatically and cannot be edited here.">?</span></label>
+  <input id="session" type="text" placeholder="auto-managed" disabled />
     </fieldset>
 
     <fieldset>
@@ -163,8 +224,8 @@
       </div>
       <div>
         <label>
-          Close child tabs after (sec)
-          <span class="help" title="Automatically close new windows/tabs after this many seconds. Use 250 seconds by default.">?</span>
+          Return to default after inactivity (sec)
+          <span class="help" title="After this many seconds of being away from the default URL, automatically return to it. Use 250 seconds by default. Set 0 to disable.">?</span>
         </label>
         <input id="tabTimeoutSec" type="number" min="0" step="1" placeholder="0 = never" />
       </div>
@@ -174,11 +235,10 @@
       <label>Preview URL</label>
       <div id="preview" style="font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; word-break: break-all; background:#f6f8fa; border:1px solid #e1e4e8; padding:8px; border-radius:4px;">—</div>
     </div>
-    <div class="actions" style="margin-top:12px;">
-      <button type="submit">Save</button>
-    </div>
-    <div id="status" class="status"></div>
   </form>
+  </div>
+  <div id="footerNote"><span id="year"></span> By Ankit Seal</div>
+  <div class="toast" id="toastMsg">Saved</div>
   <script>
     const api = window.Settings;
   function val(id){ return document.getElementById(id).value; }
@@ -238,7 +298,8 @@
 
   const payload = {
         url: val('url'),
-        session: val('session'),
+  // session value is read-only in UI; include existing value for completeness
+  session: document.getElementById('session').value,
         keepAliveSec: Number(val('keepAliveSec')||0),
         reloadAfterSec: ra,
         waitForCss: val('waitForCss') || null,
@@ -251,13 +312,14 @@
       const st = document.getElementById('status');
       try {
         const res = await api.saveConfig(payload);
-        if (res && res.ok) { st.textContent = 'Saved'; st.classList.remove('error'); }
-        else { st.textContent = 'Error: ' + (res && res.error ? res.error : 'Failed to save'); st.classList.add('error'); }
+        if (res && res.ok) { st.textContent = 'Saved'; st.classList.remove('error'); showToast('Settings saved'); }
+        else { st.textContent = 'Error'; st.classList.add('error'); showToast('Save failed','error'); }
       } catch (err) {
-        st.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
+        st.textContent = 'Error';
         st.classList.add('error');
+        showToast('Save error','error');
       }
-      setTimeout(() => { st.textContent = ''; st.classList.remove('error'); }, 2500);
+      setTimeout(() => { st.textContent = ''; st.classList.remove('error'); }, 2600);
     });
 
     function updateReloadInputs() {
@@ -500,7 +562,21 @@
       }
     }, true);
 
-    load().then(() => { updatePreview(); updateRule(); });
+  load().then(async () => { updatePreview(); updateRule(); try { const v = await api.getVersion(); document.getElementById('appVersion').textContent = 'Version ' + (v && v.version ? v.version : ''); } catch {}; document.getElementById('year').textContent = new Date().getFullYear(); });
+
+    // Keyboard shortcut Ctrl+S for save
+    window.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); document.getElementById('cfg').requestSubmit(); }
+    });
+
+    function showToast(msg,type){
+      const t = document.getElementById('toastMsg');
+      t.textContent = msg;
+      t.style.background = (type==='error') ? 'var(--danger)' : 'var(--accent)';
+      t.classList.add('show');
+      clearTimeout(t.__hide);
+      t.__hide = setTimeout(()=>{ t.classList.remove('show'); }, 2200);
+    }
   </script>
 </body>
 </html>

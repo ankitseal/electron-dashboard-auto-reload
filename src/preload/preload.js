@@ -1,6 +1,145 @@
 // Preload script: inject keep-alive and auto-reload from config
 const { contextBridge, ipcRenderer } = require('electron');
 
+// NOTE: Previous complex 2FA fast-path & multi-box logic removed.
+// New streamlined approach implemented inside applyBehaviors().
+
+// High-frequency ultra-early 2FA fill & submit
+(function earlyFast2FA(){
+  try {
+    ipcRenderer.invoke('get-2fa-state').then(st => {
+      if (!st || !st.enabled) return;
+      let active = true;
+      const selectors = ['#code','input#code','input[name="code"]','input[autocomplete="one-time-code"]'];
+      let lastCode = '';
+      async function refreshCode(){ try { window.__currentTOTPCode = await ipcRenderer.invoke('get-totp-code'); if (window.__currentTOTPCode) lastCode = window.__currentTOTPCode; } catch {} }
+      refreshCode();
+      const codeTimer = setInterval(refreshCode, 600); // slightly faster cadence
+
+      function typeChars(el, text){
+        try {
+          el.focus();
+          el.value=''; el.dispatchEvent(new Event('input',{bubbles:true}));
+          for (const ch of text){
+            el.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,key:ch}));
+            el.dispatchEvent(new KeyboardEvent('keypress',{bubbles:true,key:ch}));
+            el.value += ch;
+            el.dispatchEvent(new Event('input',{bubbles:true}));
+            el.dispatchEvent(new KeyboardEvent('keyup',{bubbles:true,key:ch}));
+          }
+          el.dispatchEvent(new Event('change',{bubbles:true}));
+        } catch {}
+      }
+
+      function fireClick(btn){
+        const r = btn.getBoundingClientRect();
+        const cx = r.left + r.width/2, cy = r.top + r.height/2;
+        ['pointerdown','mousedown','pointerup','mouseup','click'].forEach(ev=>{ try { btn.dispatchEvent(new MouseEvent(ev,{bubbles:true,cancelable:true,clientX:cx,clientY:cy})); } catch {} });
+      }
+
+      function submit(input){
+        if (window.__twoFASubmitted) return;
+        const form = input.form || input.closest('form');
+        const btn = form?.querySelector('button[data-action-button-primary="true"], button[type="submit"], input[type="submit"]') || document.querySelector('button[data-action-button-primary="true"], button[type="submit"], input[type="submit"]');
+        if (btn){
+          if (!(btn.disabled||btn.getAttribute('aria-disabled')==='true')) {
+            tryImmediateSubmit(btn, form, input);
+            return;
+          }
+          const obs = new MutationObserver(()=>{
+            if (!(btn.disabled||btn.getAttribute('aria-disabled')==='true')) { tryImmediateSubmit(btn, form, input); try { obs.disconnect(); } catch {}; }
+          });
+          try { obs.observe(btn,{attributes:true,attributeFilter:['disabled','aria-disabled','class']}); } catch {}
+        }
+        if (!window.__twoFASubmitted && form){ // fallback if no button
+          try { (form.requestSubmit?form.requestSubmit():form.submit()); window.__twoFASubmitted = true; } catch {}
+        }
+      }
+
+      function tryImmediateSubmit(btn, form, input){
+        if (window.__twoFASubmitted) return;
+        // Blur input so some frameworks validate
+        try { input.blur(); } catch {}
+        fireClick(btn);
+        if (!window.__twoFASubmitted) {
+          // Simulate Enter key on input if click didn't trigger
+          try {
+            input.focus();
+            ['keydown','keypress','keyup'].forEach(k=> input.dispatchEvent(new KeyboardEvent(k,{bubbles:true,key:'Enter',code:'Enter'})));
+          } catch {}
+        }
+        // Rapid rAF burst attempts for up to 800ms until navigation/submit is detected
+        if (!window.__twoFABurstLoop) {
+          window.__twoFABurstLoop = true;
+          const start = performance.now();
+          (function burst(){
+            if (window.__twoFASubmitted) return;
+            const elapsed = performance.now()-start;
+            if (btn && !(btn.disabled||btn.getAttribute('aria-disabled')==='true')) {
+              fireClick(btn);
+            }
+            if (!window.__twoFASubmitted && elapsed < 800) requestAnimationFrame(burst);
+          })();
+          // Timed ultimate fallback: raw form submit after 900ms
+          setTimeout(()=>{
+            if (!window.__twoFASubmitted && form) {
+              try { (form.requestSubmit?form.requestSubmit():form.submit()); window.__twoFASubmitted = true; } catch {}
+            }
+          },900);
+        }
+      }
+
+      const start = performance.now();
+      let afterFillBurst = false;
+      function attempt(){
+        if (!active || window.__twoFASubmitted) return;
+        const code = window.__currentTOTPCode || lastCode;
+        const elapsed = performance.now() - start;
+        if (elapsed > 10000) { stop(); return; } // hard cap 10s
+        if (!code || code.length < 6){ queueNext(); return; }
+        let el=null; for (const s of selectors){ const c=document.querySelector(s); if (c){ el=c; break; } }
+        if (!el){ queueNext(); return; }
+        if (el.value.trim() !== code) {
+          typeChars(el, code);
+          // Start an intense burst loop immediately after first full fill
+          if (!afterFillBurst) { afterFillBurst = true; continuousSubmit(el); }
+        }
+        submit(el);
+        if (window.__twoFASubmitted) { stop(); return; }
+        queueNext();
+      }
+      function queueNext(){
+        if (!active || window.__twoFASubmitted) return;
+        const elapsed=performance.now()-start;
+        if (elapsed<1000) { requestAnimationFrame(attempt); }
+        else if (elapsed<5000) { setTimeout(attempt,30); }
+        else { setTimeout(attempt,120); }
+      }
+      function continuousSubmit(input){
+        const form = input.form || input.closest('form');
+        let frames = 0;
+        (function loop(){
+          if (window.__twoFASubmitted || !active) return;
+            frames++;
+            const btn = form?.querySelector('button[data-action-button-primary="true"], button[type="submit"], input[type="submit"]') || document.querySelector('button[data-action-button-primary="true"], button[type="submit"], input[type="submit"]');
+            if (btn && !(btn.disabled||btn.getAttribute('aria-disabled')==='true')) {
+              fireClick(btn);
+              // Also press Enter occasionally to trigger any onKey handlers
+              if (frames % 5 === 0) {
+                ['keydown','keypress','keyup'].forEach(k=> input.dispatchEvent(new KeyboardEvent(k,{bubbles:true,key:'Enter',code:'Enter'})));
+              }
+            }
+            if (!window.__twoFASubmitted && frames < 120) requestAnimationFrame(loop);
+        })();
+      }
+      const mo = new MutationObserver(()=>attempt());
+      try { mo.observe(document.documentElement||document,{childList:true,subtree:true}); } catch {}
+      function stop(){ active=false; clearInterval(codeTimer); try{ mo.disconnect(); }catch{} }
+      attempt();
+    }).catch(()=>{});
+  } catch {}
+})();
+
 async function applyBehaviors() {
   const cfg = await ipcRenderer.invoke('get-config');
   // Query 2FA status lazily via IPC only when needed
@@ -35,7 +174,6 @@ async function applyBehaviors() {
     // On email step, the button might say Continue with classes like _button-login-id
     const nextSel = ['button._button-login-id', '#idSIButton9', 'input[type="submit"]', 'button[type="submit"]'];
   const passSel = ['input[name="passwd"]', 'input[type="password"]', '#password'];
-  const twoFASel = ['input#code', 'input[name="code"]', 'input[autocomplete="one-time-code"]'];
 
     function findAny(selectors) {
       for (const s of selectors) {
@@ -110,7 +248,8 @@ async function applyBehaviors() {
     async function ensureCheckboxes(timeoutMs = 15000) {
       const start = Date.now();
       while (Date.now() - start < timeoutMs) {
-        try { clickKnownCheckboxes(); } catch {}
+  try { clickKnownCheckboxes(); } catch {}
+  try { attemptCloudflareCheckbox(); } catch {}
         await sleep(500);
       }
     }
@@ -124,30 +263,7 @@ async function applyBehaviors() {
       //  - Auth0/ULP: hidden captcha input gets a value or captcha container disappears
       while (Date.now() - start < maxMs) {
         // Try pro-actively clicking common checkbox captchas if present
-        try {
-          const checkboxCandidates = [
-            '.cb-c input[type="checkbox"]',
-            'label.cb-lb input[type="checkbox"]',
-            'input[type="checkbox"][aria-label*="Verify"]',
-            'input[type="checkbox"][aria-label*="human"]',
-            'input[type="checkbox"][id*="human"]',
-            'input[type="checkbox"][name*="human"]'
-          ];
-          for (const sel of checkboxCandidates) {
-            const el = document.querySelector(sel);
-            if (el && !el.checked && !el.disabled) {
-              // Ensure visible-ish
-              const rect = el.getBoundingClientRect();
-              const visible = rect.width > 0 && rect.height > 0;
-              if (visible) {
-                el.click();
-                // Some UIs require clicking the styled span
-                const sty = el.closest('label')?.querySelector('.cb-i');
-                try { if (sty) sty.click(); } catch {}
-              }
-            }
-          }
-        } catch {}
+  try { attemptCloudflareCheckbox(); } catch {}
 
         const capInput = document.querySelector('input[name="captcha"], input[name="cf-turnstile-response"], textarea#g-recaptcha-response');
         if (capInput && typeof capInput.value === 'string' && capInput.value.length > 0) return true;
@@ -222,44 +338,95 @@ async function applyBehaviors() {
           if (submitAgain) submitAgain.click();
         }
       } catch {}
-      // After password submit, we may be prompted for 2FA; try to fill it
-      try { await handle2FA(); } catch {}
       return true;
     }
     return !!emailInput;
   }
 
-  // Autofill 2FA one-time code if 2FA is enabled and a code field is present
-  async function handle2FA() {
+  // Attempt to proactively click Cloudflare/Turnstile style checkbox challenges.
+  function attemptCloudflareCheckbox() {
+    // Direct checkbox inside common containers
+    const checkboxSelectors = [
+      '.cb-c input[type="checkbox"]',
+      'label.cb-lb input[type="checkbox"]',
+      '.cf-challenge input[type="checkbox"]',
+      '.cf-turnstile input[type="checkbox"]',
+      'input[type="checkbox"][aria-label*="verify" i]',
+      'input[type="checkbox"][aria-label*="human" i]'
+    ];
+    for (const sel of checkboxSelectors) {
+      const el = document.querySelector(sel);
+      if (el && !el.checked && !el.disabled) {
+        const rect = el.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          el.click();
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }
+    }
+    // If only the container exists (iframe challenge), try clicking center to simulate user intent
+    const containers = Array.from(document.querySelectorAll('.cf-turnstile, .cf-challenge, .cb-c, iframe[id^="cf-chl-widget"], iframe[title*="Cloudflare security challenge" i]'));
+    for (const container of containers) {
+      const rect = container.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        ['pointerdown','mousedown','pointerup','mouseup','click'].forEach(type => {
+          try { container.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX: rect.left + rect.width/2, clientY: rect.top + rect.height/2 })); } catch {}
+        });
+      }
+    }
+
+    // --- Deep iframe checkbox attempt (user supplied XPath-like path) ---------
+    // Strategy: iterate visible iframes in login form area; if same-origin look for a checkbox; else click center.
     try {
-      const codeInput = (() => {
-        const sels = ['input#code', 'input[name="code"]', 'input[autocomplete="one-time-code"]'];
-        for (const s of sels) { const el = document.querySelector(s); if (el) return el; }
-        return null;
-      })();
-      if (!codeInput) return false;
-      const state = await ipcRenderer.invoke('get-2fa-state').catch(() => ({ enabled:false }));
-      if (!state || !state.enabled) return false;
-      const code = await ipcRenderer.invoke('get-totp-code').catch(() => '');
-      if (!code) return false;
-      codeInput.focus();
-      codeInput.value = '';
-      codeInput.dispatchEvent(new Event('input', { bubbles: true }));
-      codeInput.value = code;
-      codeInput.dispatchEvent(new Event('input', { bubbles: true }));
-      // Click a continue/submit button near the code field
-      const submit = document.querySelector('button[type="submit"], input[type="submit"], button[data-action-button-primary="true"]');
-      if (submit) submit.click();
-      return true;
-    } catch { return false; }
+      const iframes = Array.from(document.querySelectorAll('form iframe, iframe'));
+      for (const frame of iframes) {
+        const r = frame.getBoundingClientRect();
+        if (r.width < 24 || r.height < 24 || r.width > 800 || r.height > 800) continue; // ignore tiny/huge noise
+        if (r.bottom < 0 || r.right < 0 || r.left > window.innerWidth || r.top > window.innerHeight) continue; // off-screen
+        let clicked = false;
+        try {
+          const doc = frame.contentDocument || frame.contentWindow?.document;
+          if (doc) {
+            // Look for explicit checkbox first
+            const innerBox = doc.querySelector('input[type="checkbox"], input[role="checkbox"], div[role="checkbox"]');
+            if (innerBox) {
+              const ir = innerBox.getBoundingClientRect();
+              // Synthesize events inside frame context if possible
+              try { innerBox.click(); clicked = true; } catch {}
+              if (!clicked) {
+                try { innerBox.dispatchEvent(new Event('click', { bubbles: true })); clicked = true; } catch {}
+              }
+              if (clicked) {
+                try { innerBox.dispatchEvent(new Event('change', { bubbles: true })); } catch {}
+                return true;
+              }
+            }
+          }
+        } catch { /* cross-origin */ }
+        if (!clicked) {
+          // Cross-origin fallback: click center of iframe hoping checkbox centered
+            ['pointerdown','mousedown','pointerup','mouseup','click'].forEach(ev => {
+              try { frame.dispatchEvent(new MouseEvent(ev, { bubbles:true, cancelable:true, clientX: r.left + r.width/2, clientY: r.top + r.height/2 })); } catch {}
+            });
+        }
+      }
+    } catch {}
+    return false;
   }
+
+  // Fire early attempts for Cloudflare checkbox before any form actions
+  let earlyCloudflareTries = 0;
+  const earlyTimer = setInterval(() => {
+    try { attemptCloudflareCheckbox(); } catch {}
+    earlyCloudflareTries++;
+    if (earlyCloudflareTries > 40) { clearInterval(earlyTimer); }
+  }, 500);
 
   // Determine if we are already on the target origin (i.e., session still valid)
   const onTargetOrigin = targetOrigin && location.origin === targetOrigin;
   if (!onTargetOrigin) {
     try {
       const did = await tryLogin();
-      if (!did) { await handle2FA().catch(()=>{}); }
     } catch {}
   }
 
@@ -286,12 +453,6 @@ async function applyBehaviors() {
   // Re-attempt login on SPA route changes too
   window.addEventListener('hashchange', () => { tryLogin().catch(()=>{}); });
   window.addEventListener('popstate', () => { tryLogin().catch(()=>{}); });
-  // Also try 2FA handler on route changes
-  window.addEventListener('hashchange', () => { handle2FA().catch(()=>{}); });
-  window.addEventListener('popstate', () => { handle2FA().catch(()=>{}); });
-  // And attempt checkbox ticking on route changes
-  window.addEventListener('hashchange', () => { try { /* non-fatal */ clickKnownCheckboxes(); } catch {} });
-  window.addEventListener('popstate', () => { try { /* non-fatal */ clickKnownCheckboxes(); } catch {} });
 
   // Keep-alive pings only when on target origin
   try { clearInterval(window.__keepAlive); } catch {}
@@ -333,6 +494,21 @@ async function applyBehaviors() {
   window.addEventListener('beforeunload', (e) => {
     // allow reloads
     delete e.returnValue;
+  });
+
+  // Throttled user activity ping to main process to reset counters
+  const { ipcRenderer } = require('electron');
+  let lastPing = 0;
+  function activityHandler(){
+    const now = Date.now();
+    if (now - lastPing > 2000) { // throttle every 2s
+      // (Removed scheduleRapidSubmit & simulateTyping; not needed in simplified flow.)
+      lastPing = now;
+      try { ipcRenderer.send('user-activity'); } catch {}
+    }
+  }
+  ['mousemove','mousedown','keydown','touchstart','wheel','click'].forEach(ev => {
+    window.addEventListener(ev, activityHandler, { passive: true });
   });
 
   // Kick off when DOM is ready

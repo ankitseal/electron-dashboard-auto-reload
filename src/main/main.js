@@ -7,6 +7,70 @@ const fs = require('fs');
 const urlLib = require('url');
 const crypto = require('crypto');
 const { URL } = urlLib;
+const dgram = require('dgram'); // For lightweight NTP query
+
+// --- Lightweight NTP time (used for TOTP) ----------------------------------
+// We keep an offset (ntpTime - systemTime). If NTP fails, offset stays 0 and we
+// transparently fall back to system time (previous behavior).
+let ntpOffsetMs = 0;
+let lastNtpSync = 0;
+let ntpSyncInFlight = false;
+const NTP_SERVERS = [
+  'pool.ntp.org',
+  'time.google.com',
+  'time.cloudflare.com'
+];
+
+function syncNtpTime(force = false) {
+  if (ntpSyncInFlight) return;
+  const now = Date.now();
+  if (!force && (now - lastNtpSync) < 5 * 60 * 1000) return; // 5 min cache
+  ntpSyncInFlight = true;
+  const server = NTP_SERVERS[(Math.random() * NTP_SERVERS.length) | 0];
+  try {
+    const socket = dgram.createSocket('udp4');
+    const msg = Buffer.alloc(48);
+    // LI=0 (no warning), VN=4, Mode=3 (client)
+    msg[0] = 0x1B; // 00 011 011
+    const timeout = setTimeout(() => {
+      try { socket.close(); } catch {}
+      ntpSyncInFlight = false; // timeout -> fallback remains
+    }, 1500);
+    socket.once('error', () => {
+      clearTimeout(timeout);
+      try { socket.close(); } catch {}
+      ntpSyncInFlight = false;
+    });
+    socket.once('message', (buf) => {
+      clearTimeout(timeout);
+      try {
+        if (buf.length >= 48) {
+          const secs = buf.readUInt32BE(40); // Transmit Timestamp seconds
+          const frac = buf.readUInt32BE(44); // Transmit Timestamp fraction
+          // Convert NTP (since 1900) to Unix epoch (since 1970)
+          const NTP_UNIX_DELTA = 2208988800; // seconds
+          const ms = (secs - NTP_UNIX_DELTA) * 1000 + Math.round((frac / 2 ** 32) * 1000);
+          ntpOffsetMs = ms - Date.now();
+          lastNtpSync = Date.now();
+        }
+      } catch {}
+      try { socket.close(); } catch {}
+      ntpSyncInFlight = false;
+    });
+    socket.send(msg, 123, server, () => { /* sent */ });
+  } catch {
+    ntpSyncInFlight = false; // ignore
+  }
+}
+
+// Kick off an initial (non-blocking) sync; later periodic resync.
+setTimeout(() => syncNtpTime(true), 2000); // slight delay until network ready
+setInterval(() => syncNtpTime(false), 15 * 60 * 1000).unref(); // periodic
+
+function currentTimeMsForTOTP() {
+  // If no sync yet (offset 0) this is identical to previous behavior
+  return Date.now() + ntpOffsetMs;
+}
 
 // Defaults (overridable by config.json)
 const DEFAULTS = {
@@ -288,7 +352,7 @@ async function bootstrap() {
   function generateTOTP(secretB32, timeStep = 30, digits = 6) {
     const key = base32ToBytes(secretB32);
     if (!key || key.length === 0) return '';
-    const counter = Math.floor(Date.now() / 1000 / timeStep);
+  const counter = Math.floor(currentTimeMsForTOTP() / 1000 / timeStep);
     const buf = Buffer.alloc(8);
     // big-endian counter
     buf.writeUInt32BE(Math.floor(counter / 0x100000000), 0);
@@ -406,6 +470,12 @@ async function bootstrap() {
     if (!twoFAEnabled || !twoFASecret) return '';
     try { return generateTOTP(twoFASecret); } catch { return ''; }
   });
+  // Optional: expose NTP sync status (not used yet by UI)
+  ipcMain.handle('get-ntp-status', () => ({
+    offsetMs: ntpOffsetMs,
+    lastSync: lastNtpSync,
+    usingSystemTime: ntpOffsetMs === 0
+  }));
   ipcMain.handle('remove-2fa-secret', async () => {
     twoFASecret = '';
     try {
@@ -418,6 +488,9 @@ async function bootstrap() {
     } catch {}
     return { ok: true };
   });
+
+  // App version for Settings UI
+  ipcMain.handle('get-version', () => ({ version: app.getVersion() }));
 
   // Persist config updates and apply them
   ipcMain.handle('save-config', async (_evt, newCfg) => {
@@ -532,6 +605,7 @@ async function bootstrap() {
   cfg.navigateBackEnabled = cfg.hasUrl ? merged.navigateBackEnabled : false;
   cfg.tabTimeoutSec = merged.tabTimeoutSec;
   cfg.twoFAEnabled = merged.twoFAEnabled;
+  if (cfg.autoReloadEnabled && cfg.reloadAfterSec > 0) { try { lastAutoReloadStart = Date.now(); } catch {} }
 
   // Update target base for watchdog and reset grace timer
   targetBase = cfg.hasUrl ? stripFromTo(cfg.targetUrl) : 'about:blank';
@@ -705,6 +779,12 @@ async function bootstrap() {
   // Watchdog: ensure we're on the configured URL; if not, redirect back (honor tabTimeoutSec as grace)
   let targetBase = stripFromTo(cfg.targetUrl);
   let offTargetSince = null; // timestamp when main deviated from targetBase
+  // Track approximate start of current auto-reload interval for countdown logging
+  let lastAutoReloadStart = Date.now();
+  // Track if autoReload temporarily paused due to navigate-back grace
+  let autoReloadPausedDueToNavigate = false;
+  // Track if navigate-back itself is paused explicitly due to a login page
+  let navigateBackPausedForLogin = false;
   const ensureTargetUrl = () => {
     try {
       const current = win.webContents.getURL();
@@ -714,8 +794,37 @@ async function bootstrap() {
       // If on a different base URL, schedule a redirect after the grace period (tabTimeoutSec)
       if (cfg.navigateBackEnabled && curBase !== targetBase) {
         const now = Date.now();
+        // Detect login-like pages (avoid forcing navigate-back there)
+        let isLoginPage = false;
+        try {
+          const uObj = new urlLib.URL(current);
+          const pathLower = (uObj.pathname + ' ' + uObj.search).toLowerCase();
+          if (/login|sign[-_]?in|auth|account|identity|session|passwd|password/.test(pathLower)) {
+            isLoginPage = true;
+          }
+        } catch {}
+        if (isLoginPage) {
+          // Pause navigate-back logic entirely while on login pages
+          navigateBackPausedForLogin = true;
+          offTargetSince = null; // reset any prior deviation timer
+          // Pause autoReload while on login (only once)
+          if (cfg.autoReloadEnabled && !autoReloadPausedDueToNavigate) {
+            try { win.webContents.send('auto-reload-stop'); } catch {}
+            autoReloadPausedDueToNavigate = true;
+          }
+          return; // do not proceed with navigate-back timing
+        } else if (navigateBackPausedForLogin) {
+          // Leaving login page; resume navigate-back timing fresh
+          navigateBackPausedForLogin = false;
+          offTargetSince = null;
+        }
         if (!offTargetSince) {
           offTargetSince = now;
+          // Pause autoReload while user is off the target page
+          if (cfg.autoReloadEnabled && !autoReloadPausedDueToNavigate) {
+            try { win.webContents.send('auto-reload-stop'); } catch {}
+            autoReloadPausedDueToNavigate = true;
+          }
           return;
         }
         const graceMs = Math.max(0, Number(cfg.tabTimeoutSec || 0) * 1000);
@@ -732,7 +841,14 @@ async function bootstrap() {
         return;
       } else {
         // Back on target; clear any grace timer
-        if (offTargetSince) offTargetSince = null;
+  if (offTargetSince) offTargetSince = null;
+  navigateBackPausedForLogin = false;
+        // Resume autoReload if it was paused due to navigate-back
+        if (autoReloadPausedDueToNavigate && cfg.autoReloadEnabled && cfg.reloadAfterSec > 0) {
+          try { lastAutoReloadStart = Date.now(); } catch {}
+          try { win.webContents.send('auto-reload-start'); } catch {}
+        }
+        autoReloadPausedDueToNavigate = false;
       }
 
       // If rolling window is enabled, ensure from/to match desired window
@@ -783,6 +899,38 @@ async function bootstrap() {
   }, 10 * 1000);
   win.on('closed', () => { try { clearInterval(childTimer); } catch {} });
 
+  // Countdown logger every 10s when AutoReload or Navigate Back active
+  const countdownLoggerId = setInterval(() => {
+    try {
+      const segs = [];
+      const now = Date.now();
+      if (cfg.autoReloadEnabled && cfg.reloadAfterSec > 0) {
+        const cycleMs = cfg.reloadAfterSec * 1000;
+        let nextAt = lastAutoReloadStart + cycleMs;
+        if (now >= nextAt) { // renderer probably reloaded already; reset baseline
+          lastAutoReloadStart = now;
+          nextAt = lastAutoReloadStart + cycleMs;
+        }
+        const remain = Math.max(0, Math.round((nextAt - now) / 1000));
+        segs.push(`autoReload ${autoReloadPausedDueToNavigate ? 'paused(navigateBack)' : remain + 's'}`);
+      }
+      if (cfg.navigateBackEnabled && cfg.tabTimeoutSec > 0) {
+        if (navigateBackPausedForLogin) {
+          segs.push('navigateBack paused(login)');
+        } else if (offTargetSince) {
+          const graceMs = cfg.tabTimeoutSec * 1000;
+          const elapsed = now - offTargetSince;
+          const remain = Math.max(0, Math.round((graceMs - elapsed) / 1000));
+          segs.push(`navigateBack ${remain}s`);
+        } else {
+          segs.push('navigateBack idle');
+        }
+      }
+      if (segs.length) console.log('[electron-auto-reload][countdown]', segs.join(' | '));
+    } catch {}
+  }, 10 * 1000);
+  win.on('closed', () => { try { clearInterval(countdownLoggerId); } catch {} });
+
   // Menu with Settings and Auto-Reload controls
   const openSettings = () => {
     const settingsWin = new BrowserWindow({
@@ -810,6 +958,17 @@ async function bootstrap() {
   });
   ipcMain.on('auto-reload-stop', () => {
     try { win.webContents.send('auto-reload-stop'); } catch {}
+  });
+
+  // User activity resets auto-reload countdown and navigate-back grace timer start
+  ipcMain.on('user-activity', () => {
+    try {
+      lastAutoReloadStart = Date.now();
+      if (offTargetSince) {
+        // Give full grace again on interaction
+        offTargetSince = Date.now();
+      }
+    } catch {}
   });
 
   // Menu with a toggle checkbox for auto-refresh
@@ -869,6 +1028,7 @@ async function bootstrap() {
             cfg.autoReloadEnabled = enable;
             cfg.reloadAfterSec = enable ? newReload : 0;
             if (enable) {
+              try { lastAutoReloadStart = Date.now(); } catch {}
               win.webContents.send('auto-reload-start');
             } else {
               win.webContents.send('auto-reload-stop');

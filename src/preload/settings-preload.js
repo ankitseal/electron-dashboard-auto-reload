@@ -12,4 +12,5 @@ contextBridge.exposeInMainWorld('Settings', {
   get2FAState: () => ipcRenderer.invoke('get-2fa-state'),
   getTOTPCode: () => ipcRenderer.invoke('get-totp-code'),
   remove2FASecret: () => ipcRenderer.invoke('remove-2fa-secret')
+  , getVersion: () => ipcRenderer.invoke('get-version')
 });
