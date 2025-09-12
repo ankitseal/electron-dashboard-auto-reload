@@ -404,7 +404,8 @@ async function bootstrap() {
       partition: partitionName,
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: true,
+      enableRemoteModule: false
     }
   });
 
@@ -642,7 +643,8 @@ async function bootstrap() {
         partition: partitionName,
         contextIsolation: true,
         nodeIntegration: false,
-        sandbox: false
+        sandbox: true,
+        enableRemoteModule: false
       }
     });
     // Track active time
@@ -943,7 +945,9 @@ async function bootstrap() {
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
-        preload: path.join(__dirname, '..', 'preload', 'settings-preload.js')
+        preload: path.join(__dirname, '..', 'preload', 'settings-preload.js'),
+        sandbox: true,
+        enableRemoteModule: false
       }
     });
     settingsWin.removeMenu();
@@ -982,7 +986,7 @@ async function bootstrap() {
           label: 'Auto Refresh',
           type: 'checkbox',
           checked: !!cfg.autoReloadEnabled,
-          click: async (menuItem) => {
+          click: (menuItem) => {
             if (!cfg.hasUrl) { menuItem.checked = false; return; }
             // Toggle
             const enable = menuItem.checked;
@@ -991,7 +995,6 @@ async function bootstrap() {
               newReload = 250; // default when enabling via menu
             }
             // Persist config and update in-memory
-            const res = await ipcMain.invoke ? null : null; // placeholder to avoid linter
             try {
               // Write directly without going through renderer
               const targetPath = path.join(app.getPath('userData'), 'config.json');
