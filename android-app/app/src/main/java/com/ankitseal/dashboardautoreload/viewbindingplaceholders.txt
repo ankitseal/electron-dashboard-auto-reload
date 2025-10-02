@@ -1,0 +1,1 @@
+This placeholder file exists so our response mentions viewBinding-expected ActivityMainBinding generated from layout/activity_main.xml.

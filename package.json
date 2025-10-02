@@ -1,0 +1,116 @@
+{
+  "name": "ankitseal-dashboard-auto-reload",
+  "version": "1.6.0",
+  "description": "Electron app to load a dashboard URL with a pre-set SESSION cookie, keep-alive pings, and periodic reload.",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "electron-forge start",
+    "make": "electron-forge make",
+    "make:portable": "electron-forge make --platform=win32 --arch=x64",
+    "make:linux": "electron-forge make --platform=linux --arch=x64",
+    "make:wix": "electron-forge make --platform=win32 --arch=x64 --make-target=@electron-forge/maker-wix",
+    "package": "electron-forge package",
+    "publish": "electron-forge publish",
+    "dist": "electron-builder --win portable",
+    "dist:portable": "electron-builder --win portable --x64",
+    "dist:dir": "electron-builder --dir --win",
+    "dist:linux": "electron-builder --linux AppImage --x64",
+    "postinstall": "node -e \"try{require('electron');}catch(e){}\""
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "@electron-forge/cli": "^7.5.0",
+    "@electron-forge/maker-squirrel": "^7.5.0",
+    "@electron-forge/maker-wix": "^7.9.0",
+    "@electron-forge/maker-zip": "^7.5.0",
+    "electron": "^31.3.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.ankitseal.dashboardautoreload",
+    "productName": "Dashboard Auto Reload",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "image/icon.ico",
+        "to": "image/icon.ico"
+      },
+      "config.json"
+    ],
+    "asar": true,
+    "win": {
+      "icon": "image/icon.ico",
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-${arch}-portable.exe"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Utility",
+      "artifactName": "${productName}-${version}-${arch}.AppImage"
+    }
+  },
+  "config": {
+    "forge": {
+      "packagerConfig": {
+        "asar": true,
+        "prune": true,
+        "out": "out",
+        "overwrite": true,
+        "files": [
+          "src/**",
+          "package.json"
+        ],
+        "icon": "image/icon",
+        "extraResource": [
+          "image/icon.ico",
+          "config.json"
+        ],
+        "ignore": [
+          "^/node_modules($|/)",
+          "^/(?:dist|out|coverage)(?:/|$)",
+          "^/(?:tests?|scripts?)(?:/|$)",
+          "^/(?:\\.git|\\.github|\\.vscode)(?:/|$)",
+          "^/.*\\.(?:map|md)$",
+          "^/LICENSE$"
+        ]
+      },
+      "makers": [
+        {
+          "name": "@electron-forge/maker-zip",
+          "platforms": [
+            "win32",
+            "linux"
+          ]
+        },
+        {
+          "name": "@electron-forge/maker-wix",
+          "config": {
+            "language": 1033,
+            "manufacturer": "Ankit Seal",
+            "shortcutName": "Dashboard Auto Reload",
+            "icon": "image/icon.ico",
+            "ui": {
+              "chooseDirectory": false
+            }
+          }
+        }
+      ]
+    }
+  }
+}
