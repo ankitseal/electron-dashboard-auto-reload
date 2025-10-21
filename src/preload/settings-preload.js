@@ -11,6 +11,11 @@ contextBridge.exposeInMainWorld('Settings', {
   set2FAEnabled: (enabled) => ipcRenderer.invoke('set-2fa-enabled', !!enabled),
   get2FAState: () => ipcRenderer.invoke('get-2fa-state'),
   getTOTPCode: () => ipcRenderer.invoke('get-totp-code'),
-  remove2FASecret: () => ipcRenderer.invoke('remove-2fa-secret')
-  , getVersion: () => ipcRenderer.invoke('get-version')
+  remove2FASecret: () => ipcRenderer.invoke('remove-2fa-secret'),
+  getVersion: () => ipcRenderer.invoke('get-version'),
+  setNtpPreference: (server, useSystemTime) => ipcRenderer.invoke('set-ntp-preference', {
+    server,
+    useSystemTime
+  }),
+  setProxyPreference: (options) => ipcRenderer.invoke('set-proxy-preference', options || {})
 });

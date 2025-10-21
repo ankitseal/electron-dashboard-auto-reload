@@ -54,7 +54,70 @@
     input[type=text], input[type=password], input[type=number], select { width:100%; padding:10px 12px; font: 14px/1.3 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; border:1px solid var(--border); border-radius:8px; background: var(--bg-alt); color: var(--text); box-shadow: inset 0 1px 2px rgba(0,0,0,0.05); transition:border-color .15s, background .25s; }
     input:focus, select:focus { outline:none; border-color: var(--accent); box-shadow: var(--focus); }
     .row { display:grid; gap:18px; grid-template-columns: repeat(auto-fit,minmax(240px,1fr)); }
-    .toggle { display:inline-flex; align-items:center; gap:10px; font-weight:600; }
+    label.toggle {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:14px;
+      font-weight:600;
+      margin:12px 0;
+    }
+    label.toggle .toggle-text {
+      display:flex;
+      align-items:center;
+      gap:8px;
+      flex:1;
+    }
+    label.toggle input[type=checkbox] {
+      appearance:none;
+      width:46px;
+      height:28px;
+      border-radius:999px;
+      background: var(--border);
+      position:relative;
+      transition: background .25s ease;
+      cursor:pointer;
+      border:2px solid transparent;
+    }
+    label.toggle input[type=checkbox]::after {
+      content:'';
+      position:absolute;
+      top:2px;
+      left:2px;
+      width:20px;
+      height:20px;
+      border-radius:50%;
+      background:#fff;
+      box-shadow:0 1px 3px rgba(15,23,42,0.25);
+      transition: transform .25s ease;
+    }
+    label.toggle input[type=checkbox]:checked {
+      background: var(--accent);
+    }
+    label.toggle input[type=checkbox]:checked::after {
+      transform: translateX(20px);
+    }
+    label.toggle input[type=checkbox]:focus-visible {
+      outline:none;
+      box-shadow: var(--focus);
+    }
+    label.toggle input[type=checkbox]:disabled {
+      opacity:0.5;
+      cursor:not-allowed;
+    }
+    label.toggle input[type=checkbox]:disabled::after {
+      background:#f8f9fb;
+    }
+    .collapsible {
+      overflow:hidden;
+      max-height:0;
+      opacity:0;
+      transition:max-height .35s ease, opacity .25s ease;
+    }
+    .collapsible[data-open="true"] {
+      max-height:600px;
+      opacity:1;
+    }
     .pwd { display:flex; gap:8px; align-items:center; }
     .pwd button { flex:0 0 auto; background: var(--accent); color:#fff; border:none; padding:8px 10px; border-radius:8px; cursor:pointer; font-size:14px; line-height:1; display:flex; align-items:center; justify-content:center; }
     .pwd button:hover { background: var(--accent-hover); }
@@ -116,9 +179,11 @@
 
       <div style="margin-top:8px;">
         <label class="toggle">
+          <span class="toggle-text">
+            Enable 2FA autofill during login
+            <span class="help" title="Auto-fill the one-time code on 2FA screens using a TOTP secret. The code updates every 30s.">?</span>
+          </span>
           <input id="twoFAEnabled" type="checkbox" />
-          Enable 2FA autofill during login
-          <span class="help" title="Auto-fill the one-time code on 2FA screens using a TOTP secret. The code updates every 30s.">?</span>
         </label>
       </div>
       <div id="twoFASetup" style="display:none;">
@@ -160,69 +225,119 @@
           <input id="waitForCss" type="text" placeholder="#selector" />
         </div>
       </div>
-      <div class="row" style="margin-top:8px;">
-        <div>
-          <label>
-            Reload After (sec)
-    <span class="help" title="Time between automatic page reloads. Use 250 seconds by default. When Rolling Window is enabled, this must be less than the window duration.">?</span>
-          </label>
-          <input id="reloadAfterSec" type="number" min="1" step="1" />
-        </div>
-        <div>
-          <label class="toggle" style="margin-top: 28px;">
-            <input id="autoReloadEnabled" type="checkbox" />
-            Auto Refresh Enabled
-            <span class="help" title="Turn on periodic page reloads using the interval on the left.">?</span>
-          </label>
-        </div>
+      <label class="toggle">
+        <span class="toggle-text">
+          Auto Refresh Enabled
+          <span class="help" title="Turn on periodic page reloads using the interval below.">?</span>
+        </span>
+        <input id="autoReloadEnabled" type="checkbox" />
+      </label>
+      <div id="autoReloadFields" class="collapsible" data-open="false" style="margin-top:8px;">
+        <label>
+          Reload After (sec)
+          <span class="help" title="Time between automatic page reloads. Use 250 seconds by default. When Rolling Window is enabled, this must be less than the window duration.">?</span>
+        </label>
+        <input id="reloadAfterSec" type="number" min="1" step="1" />
+        <div id="ruleWarn" class="status error" style="display:none; margin-top:4px;"></div>
       </div>
-  <div id="ruleWarn" class="status error" style="display:none; margin-top:4px;"></div>
     </fieldset>
 
     <fieldset>
       <legend>Rolling Window</legend>
-      <div>
-        <label>
-          <input id="twEnabled" type="checkbox" />
+      <label class="toggle">
+        <span class="toggle-text">
           Enable rolling window
           <span class="help" title="Append from/to timestamps for a daily rolling window starting at the chosen time.">?</span>
-        </label>
+        </span>
+        <input id="twEnabled" type="checkbox" />
+      </label>
+      <div id="twFields" class="collapsible" data-open="false" style="margin-top:8px;">
+        <div>
+          <label>
+            Daily start (HH:MM)
+            <span class="help" title="Local time to start each daily window. Disabled if rolling window is off.">?</span>
+          </label>
+          <input id="twStart" type="text" placeholder="12:00" />
+        </div>
+        <div style="margin-top:8px;">
+          <label>
+            Duration
+            <span class="help" title="Length of each rolling window.">?</span>
+          </label>
+          <select id="twDuration">
+            <option value="1h">1h</option>
+            <option value="2h">2h</option>
+            <option value="6h">6h</option>
+            <option value="12h">12h</option>
+            <option value="1d">1d</option>
+            <option value="2d">2d</option>
+            <option value="5d">5d</option>
+            <option value="7d">7d</option>
+          </select>
+        </div>
       </div>
-      <div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Time Source</legend>
+      <label class="toggle">
+        <span class="toggle-text">
+          Use local PC time
+          <span class="help" title="When enabled, the app skips NTP lookups and uses the kiosk's system clock for TOTP codes.">?</span>
+        </span>
+        <input id="useSystemTime" type="checkbox" />
+      </label>
+      <div id="ntpFields" class="collapsible" data-open="false" style="margin-top:8px;">
         <label>
-          Daily start (HH:MM)
-          <span class="help" title="Local time to start each daily window. Disabled if rolling window is off.">?</span>
+          NTP Server
+          <span class="help" title="Optional hostname(s) of the NTP server used to correct clock drift when generating TOTP codes.">?</span>
         </label>
-        <input id="twStart" type="text" placeholder="12:00" />
+        <input id="ntpServer" type="text" placeholder="pool.ntp.org" />
+        <div class="helptext">Leave blank to fall back to local PC time. Multiple servers can be comma separated.</div>
       </div>
-      <div>
-        <label>
-          Duration
-          <span class="help" title="Length of each rolling window.">?</span>
+    </fieldset>
+
+    <fieldset>
+      <legend>Proxy (Squid)</legend>
+      <label class="toggle">
+        <span class="toggle-text">
+          Use HTTP/HTTPS proxy
+          <span class="help" title="Enable when routing traffic through a Squid-compatible HTTP proxy.">?</span>
+        </span>
+        <input id="proxyEnabled" type="checkbox" />
+      </label>
+      <div id="proxyFields" class="collapsible" data-open="false" style="margin-top:8px;">
+        <div class="row">
+          <div>
+            <label>Proxy Host</label>
+            <input id="proxyHost" type="text" placeholder="proxy.example.com" />
+          </div>
+          <div>
+            <label>Proxy Port</label>
+            <input id="proxyPort" type="number" min="1" max="65535" step="1" placeholder="3128" />
+          </div>
+        </div>
+        <label class="toggle" style="margin-top:12px;">
+          <span class="toggle-text">
+            Proxy uses HTTPS
+            <span class="help" title="Also send HTTPS requests through the same proxy host and port. Leave off if the proxy only accepts HTTP.">?</span>
+          </span>
+          <input id="proxyUseHttps" type="checkbox" />
         </label>
-        <select id="twDuration">
-          <option value="1h">1h</option>
-          <option value="2h">2h</option>
-          <option value="6h">6h</option>
-          <option value="12h">12h</option>
-          <option value="1d">1d</option>
-          <option value="2d">2d</option>
-          <option value="5d">5d</option>
-          <option value="7d">7d</option>
-        </select>
+        <div class="helptext">Proxy settings apply immediately after you toggle or edit the fields.</div>
       </div>
     </fieldset>
 
     <fieldset>
       <legend>Navigation</legend>
-      <div>
-        <label>
-          <input id="navigateBackEnabled" type="checkbox" />
+      <label class="toggle">
+        <span class="toggle-text">
           Navigate back to default URL
           <span class="help" title="If the page navigates away, return to the configured URL. Requires a positive child tab timeout.">?</span>
-        </label>
-      </div>
-      <div>
+        </span>
+        <input id="navigateBackEnabled" type="checkbox" />
+      </label>
+      <div id="navBackFields" class="collapsible" data-open="false" style="margin-top:8px;">
         <label>
           Return to default after inactivity (sec)
           <span class="help" title="After this many seconds of being away from the default URL, automatically return to it. Use 250 seconds by default. Set 0 to disable.">?</span>
@@ -241,8 +356,48 @@
   <div class="toast" id="toastMsg">Saved</div>
   <script>
     const api = window.Settings;
+    const NTP_DEFAULT_HOST = 'uk.pool.ntp.org';
   function val(id){ return document.getElementById(id).value; }
-    function setVal(id,v){ document.getElementById(id).value = v ?? ''; }
+    function sanitizeProxyHostValue(raw, portInput) {
+      if (!raw) return '';
+      let trimmed = String(raw).trim();
+      trimmed = trimmed.replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, '');
+      trimmed = trimmed.split('/')[0];
+      let extractedPort = null;
+      if (trimmed.startsWith('[')) {
+        const end = trimmed.indexOf(']');
+        if (end !== -1) {
+          const remainder = trimmed.slice(end + 1);
+          if (remainder.startsWith(':')) {
+            const candidate = remainder.slice(1);
+            if (/^[0-9]+$/.test(candidate)) {
+              extractedPort = candidate;
+            }
+          }
+          trimmed = trimmed.slice(0, end + 1);
+        }
+      } else {
+        const colonIndex = trimmed.lastIndexOf(':');
+        if (colonIndex > -1) {
+          const candidate = trimmed.slice(colonIndex + 1);
+          if (/^[0-9]+$/.test(candidate)) {
+            extractedPort = candidate;
+            trimmed = trimmed.slice(0, colonIndex);
+          }
+        }
+      }
+      if (portInput && extractedPort && (!portInput.value || Number(portInput.value) <= 0)) {
+        portInput.value = extractedPort;
+      }
+      return trimmed;
+    }
+    function setVal(id,v){
+      if (id === 'proxyHost') {
+        document.getElementById(id).value = sanitizeProxyHostValue(v, document.getElementById('proxyPort'));
+        return;
+      }
+      document.getElementById(id).value = v ?? '';
+    }
     function setChk(id,v){ document.getElementById(id).checked = !!v; }
 
     async function load(){
@@ -255,6 +410,17 @@
   setVal('keepAliveSec', cfg.keepAliveSec);
   setVal('reloadAfterSec', cfg.reloadAfterSec);
   setVal('waitForCss', cfg.waitForCss);
+  setVal('ntpServer', cfg.ntpServer || '');
+  setChk('useSystemTime', !!cfg.useSystemTime);
+  const ntpInput = document.getElementById('ntpServer');
+  const ntpToggle = document.getElementById('useSystemTime');
+  if (ntpInput && ntpToggle && !ntpToggle.checked && !ntpInput.value.trim()) {
+    ntpInput.value = NTP_DEFAULT_HOST;
+  }
+  setChk('proxyEnabled', !!cfg.proxyEnabled);
+  setVal('proxyHost', cfg.proxyHost || '');
+  setVal('proxyPort', Number.isFinite(Number(cfg.proxyPort)) && Number(cfg.proxyPort) > 0 ? Number(cfg.proxyPort) : '');
+  setChk('proxyUseHttps', cfg.proxyUseHttps === undefined ? true : !!cfg.proxyUseHttps);
   setChk('twEnabled', cfg.timeWindow?.enabled);
   // Default twStart to 12:00 when enabled but missing
   const startVal = (cfg.timeWindow?.enabled && (!cfg.timeWindow?.start || !String(cfg.timeWindow.start).trim())) ? '12:00' : cfg.timeWindow?.start;
@@ -273,6 +439,10 @@
   if (!!cfg.navigateBackEnabled && (!Number.isFinite(tabTo) || tabTo <= 0)) tabTo = 250;
   setVal('tabTimeoutSec', Number.isFinite(tabTo) ? tabTo : 0);
   updateTwInputs();
+  updateNtpInputs();
+  updateProxyInputs();
+  scheduleNtpPreferenceUpdate();
+  scheduleProxyPreferenceUpdate();
     }
 
   document.getElementById('cfg').addEventListener('submit', async (e) => {
@@ -307,7 +477,13 @@
     timeWindow: { enabled: twOn, start: twStart || '12:00', duration: (document.getElementById('twDuration') ? document.getElementById('twDuration').value : '1d') },
   autoReloadEnabled: toggleOn,
   navigateBackEnabled: navBackOn,
-  tabTimeoutSec: tabTimeout
+  tabTimeoutSec: tabTimeout,
+  useSystemTime: document.getElementById('useSystemTime').checked,
+  ntpServer: val('ntpServer').trim(),
+  proxyEnabled: document.getElementById('proxyEnabled').checked,
+  proxyHost: sanitizeProxyHostValue(val('proxyHost'), document.getElementById('proxyPort')),
+  proxyPort: Number(document.getElementById('proxyPort').value),
+  proxyUseHttps: document.getElementById('proxyUseHttps') ? document.getElementById('proxyUseHttps').checked : false
       };
       const st = document.getElementById('status');
       try {
@@ -325,8 +501,10 @@
     function updateReloadInputs() {
       const on = document.getElementById('autoReloadEnabled').checked;
       const ra = document.getElementById('reloadAfterSec');
+      const wrap = document.getElementById('autoReloadFields');
       ra.disabled = !on;
       ra.min = on ? '1' : '0';
+      if (wrap) wrap.dataset.open = on ? 'true' : 'false';
   updateRule();
     }
 
@@ -338,6 +516,125 @@
       if (!on) setVal('reloadAfterSec', 0);
   updateRule();
     });
+
+    let ntpUpdateTimer = null;
+    function scheduleNtpPreferenceUpdate() {
+      try { clearTimeout(ntpUpdateTimer); } catch {}
+      ntpUpdateTimer = setTimeout(() => {
+        const toggle = document.getElementById('useSystemTime');
+        const input = document.getElementById('ntpServer');
+        if (!toggle || !input) return;
+        api.setNtpPreference(input.value.trim(), toggle.checked).catch(() => {});
+      }, 250);
+    }
+    function updateNtpInputs() {
+      const toggle = document.getElementById('useSystemTime');
+      const input = document.getElementById('ntpServer');
+      const wrap = document.getElementById('ntpFields');
+      if (!toggle || !input) return;
+      input.disabled = toggle.checked;
+      if (wrap) wrap.dataset.open = toggle.checked ? 'false' : 'true';
+    }
+    let proxyUpdateTimer = null;
+    function scheduleProxyPreferenceUpdate() {
+      try { clearTimeout(proxyUpdateTimer); } catch {}
+      proxyUpdateTimer = setTimeout(() => {
+        const enabled = document.getElementById('proxyEnabled');
+        const host = document.getElementById('proxyHost');
+        const port = document.getElementById('proxyPort');
+        const httpsToggle = document.getElementById('proxyUseHttps');
+        if (!enabled || !host || !port || !httpsToggle) return;
+  const cleanHost = sanitizeProxyHostValue(host.value, port);
+        if (cleanHost !== host.value) {
+          host.value = cleanHost;
+        }
+        api.setProxyPreference({
+          enabled: enabled.checked,
+          host: cleanHost,
+          port: Number(port.value),
+          useHttps: httpsToggle.checked
+        }).then((res) => {
+          if (!res || !enabled) return;
+          if (typeof res.enabled === 'boolean' && res.enabled !== enabled.checked) {
+            enabled.checked = res.enabled;
+            updateProxyInputs();
+          }
+          if (typeof res.useHttps === 'boolean' && httpsToggle) {
+            httpsToggle.checked = res.useHttps;
+          }
+        }).catch(() => {});
+      }, 250);
+    }
+    function updateProxyInputs() {
+      const enabled = document.getElementById('proxyEnabled');
+      const host = document.getElementById('proxyHost');
+      const port = document.getElementById('proxyPort');
+      const httpsToggle = document.getElementById('proxyUseHttps');
+      const wrap = document.getElementById('proxyFields');
+      if (!enabled || !host || !port) return;
+      const disableFields = !enabled.checked;
+      host.disabled = disableFields;
+      port.disabled = disableFields;
+      if (httpsToggle) httpsToggle.disabled = disableFields;
+      if (wrap) wrap.dataset.open = disableFields ? 'false' : 'true';
+    }
+    const useSystemToggle = document.getElementById('useSystemTime');
+    if (useSystemToggle) {
+      useSystemToggle.addEventListener('change', () => {
+        if (!useSystemToggle.checked) {
+          const field = document.getElementById('ntpServer');
+          if (field && !field.value.trim()) {
+            field.value = NTP_DEFAULT_HOST;
+          }
+        }
+        updateNtpInputs();
+        scheduleNtpPreferenceUpdate();
+      });
+    }
+    const ntpServerInput = document.getElementById('ntpServer');
+    if (ntpServerInput) {
+      ntpServerInput.addEventListener('input', () => {
+        scheduleNtpPreferenceUpdate();
+      });
+      ntpServerInput.addEventListener('blur', () => {
+        const toggle = document.getElementById('useSystemTime');
+        if (toggle && !toggle.checked && !ntpServerInput.value.trim()) {
+          ntpServerInput.value = NTP_DEFAULT_HOST;
+        }
+        scheduleNtpPreferenceUpdate();
+      });
+    }
+    const proxyToggle = document.getElementById('proxyEnabled');
+  const proxyHostInput = document.getElementById('proxyHost');
+  const proxyPortInput = document.getElementById('proxyPort');
+  const proxyHttpsToggle = document.getElementById('proxyUseHttps');
+    if (proxyToggle) {
+      proxyToggle.addEventListener('change', () => {
+        updateProxyInputs();
+        scheduleProxyPreferenceUpdate();
+      });
+    }
+    if (proxyHostInput) {
+      proxyHostInput.addEventListener('input', scheduleProxyPreferenceUpdate);
+      proxyHostInput.addEventListener('blur', () => {
+  const clean = sanitizeProxyHostValue(proxyHostInput.value, document.getElementById('proxyPort'));
+        if (clean !== proxyHostInput.value) proxyHostInput.value = clean;
+        scheduleProxyPreferenceUpdate();
+      });
+    }
+    if (proxyPortInput) {
+      proxyPortInput.addEventListener('input', scheduleProxyPreferenceUpdate);
+      proxyPortInput.addEventListener('blur', () => {
+        const valNum = Number(proxyPortInput.value);
+        if (!Number.isFinite(valNum) || valNum <= 0) {
+          proxyPortInput.value = '';
+        }
+        scheduleProxyPreferenceUpdate();
+      });
+    }
+    if (proxyHttpsToggle) {
+      proxyHttpsToggle.addEventListener('change', scheduleProxyPreferenceUpdate);
+    }
 
     document.getElementById('togglePwd').addEventListener('click', () => {
       const p = document.getElementById('password');
@@ -414,12 +711,14 @@
       const on = document.getElementById('twEnabled').checked;
       const input = document.getElementById('twStart');
       const dur = document.getElementById('twDuration');
+      const wrap = document.getElementById('twFields');
       input.disabled = !on;
       if (dur) dur.disabled = !on;
       if (on) {
         const cur = String(input.value||'').trim();
         if (!cur) input.value = '12:00';
       }
+      if (wrap) wrap.dataset.open = on ? 'true' : 'false';
       updatePreview();
     }
     document.getElementById('twEnabled').addEventListener('change', updateTwInputs);
@@ -431,6 +730,7 @@
     function updateNavBackInputs() {
       const chk = document.getElementById('navigateBackEnabled');
       const input = document.getElementById('tabTimeoutSec');
+      const wrap = document.getElementById('navBackFields');
       if (!chk.checked) {
         input.disabled = true;
         input.min = '0';
@@ -443,6 +743,7 @@
           input.value = '250'; // default like Reload After
         }
       }
+      if (wrap) wrap.dataset.open = chk.checked ? 'true' : 'false';
     }
     function onTimeoutInput() {
       const input = document.getElementById('tabTimeoutSec');

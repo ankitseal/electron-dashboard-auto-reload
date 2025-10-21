@@ -1,6 +1,6 @@
 {
   "name": "ankitseal-dashboard-auto-reload",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Electron app to load a dashboard URL with a pre-set SESSION cookie, keep-alive pings, and periodic reload.",
   "main": "src/main/main.js",
   "scripts": {
@@ -17,8 +17,8 @@
     "dist:linux": "electron-builder --linux AppImage --x64",
     "postinstall": "node -e \"try{require('electron');}catch(e){}\""
   },
-  "author": "",
-  "license": "MIT",
+  "author": "Ankit Seal",
+  "license": "Business Source License 1.1",
   "devDependencies": {
     "@electron-forge/cli": "^7.5.0",
     "@electron-forge/maker-squirrel": "^7.5.0",

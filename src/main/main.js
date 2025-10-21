@@ -15,18 +15,85 @@ const dgram = require('dgram'); // For lightweight NTP query
 let ntpOffsetMs = 0;
 let lastNtpSync = 0;
 let ntpSyncInFlight = false;
-const NTP_SERVERS = [
-  'pool.ntp.org',
-  'time.google.com',
-  'time.cloudflare.com'
-];
+let configuredNtpServers = [];
+let useSystemTimePreference = false;
+
+function splitProxyHost(raw) {
+  if (!raw) return { host: '', port: null };
+  let str = String(raw).trim();
+  str = str.replace(/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//, '');
+  str = str.split('/')[0];
+  if (str.startsWith('[')) {
+    const end = str.indexOf(']');
+    if (end !== -1) {
+      const host = str.slice(0, end + 1);
+      const remainder = str.slice(end + 1);
+      if (remainder.startsWith(':')) {
+        const candidate = remainder.slice(1);
+        if (/^[0-9]+$/.test(candidate)) {
+          return { host, port: Number(candidate) };
+        }
+      }
+      return { host, port: null };
+    }
+  } else {
+    const colonIndex = str.lastIndexOf(':');
+    if (colonIndex > -1) {
+      const candidate = str.slice(colonIndex + 1);
+      if (/^[0-9]+$/.test(candidate)) {
+        return { host: str.slice(0, colonIndex), port: Number(candidate) };
+      }
+    }
+  }
+  return { host: str, port: null };
+}
+
+function sanitizeProxyHost(raw) {
+  return splitProxyHost(raw).host;
+}
+
+function parseNtpServers(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || '').trim()).filter(Boolean);
+  }
+  if (typeof value === 'string') {
+    return value
+      .split(/[,\s]+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function applyNtpPreferences(serverValue, useLocalTime) {
+  const parsed = parseNtpServers(serverValue);
+  configuredNtpServers = parsed;
+  useSystemTimePreference = !!useLocalTime || parsed.length === 0;
+  syncNtpTime(true);
+}
 
 function syncNtpTime(force = false) {
+  if (useSystemTimePreference) {
+    ntpOffsetMs = 0;
+    lastNtpSync = Date.now();
+    ntpSyncInFlight = false;
+    return;
+  }
   if (ntpSyncInFlight) return;
   const now = Date.now();
   if (!force && (now - lastNtpSync) < 5 * 60 * 1000) return; // 5 min cache
   ntpSyncInFlight = true;
-  const server = NTP_SERVERS[(Math.random() * NTP_SERVERS.length) | 0];
+  if (!configuredNtpServers.length) {
+    ntpSyncInFlight = false;
+    ntpOffsetMs = 0;
+    lastNtpSync = Date.now();
+    return;
+  }
+  const server = configuredNtpServers[(Math.random() * configuredNtpServers.length) | 0];
+  if (!server) {
+    ntpSyncInFlight = false;
+    return;
+  }
   try {
     const socket = dgram.createSocket('udp4');
     const msg = Buffer.alloc(48);
@@ -76,7 +143,13 @@ function currentTimeMsForTOTP() {
 const DEFAULTS = {
   reloadAfterSec: 300,
   waitForCss: null,
-  keepAliveSec: 0
+  keepAliveSec: 0,
+  ntpServer: '',
+  useSystemTime: false,
+  proxyHost: '',
+  proxyPort: 0,
+  proxyUseHttps: true,
+  proxyEnabled: false
 };
 
 function loadConfig() {
@@ -215,6 +288,34 @@ function loadConfig() {
     }
   }
 
+  const configuredNtpServer = (typeof cfg.ntpServer === 'string')
+    ? cfg.ntpServer.trim()
+    : DEFAULTS.ntpServer;
+  const useSystemTime = (cfg.useSystemTime === undefined)
+    ? DEFAULTS.useSystemTime
+    : !!cfg.useSystemTime;
+  const { host: parsedProxyHost, port: inlineProxyPort } = splitProxyHost(cfg.proxyHost);
+  const { host: parsedLegacyHttpsHost, port: inlineLegacyHttpsPort } = splitProxyHost(cfg.proxyHttpsHost);
+  let proxyHost = parsedProxyHost || DEFAULTS.proxyHost;
+  let proxyPort = Number.isFinite(Number(cfg.proxyPort)) ? Number(cfg.proxyPort) : (inlineProxyPort ?? DEFAULTS.proxyPort);
+  const legacyHttpsHost = parsedLegacyHttpsHost;
+  const legacyHttpsPort = Number.isFinite(Number(cfg.proxyHttpsPort)) ? Number(cfg.proxyHttpsPort) : (inlineLegacyHttpsPort ?? 0);
+  let proxyUseHttps = (cfg.proxyUseHttps === undefined)
+    ? DEFAULTS.proxyUseHttps
+    : !!cfg.proxyUseHttps;
+
+  if (!proxyUseHttps && (legacyHttpsHost || legacyHttpsPort > 0)) {
+    if (!proxyHost && legacyHttpsHost) proxyHost = legacyHttpsHost;
+    if ((!Number.isFinite(proxyPort) || proxyPort <= 0) && legacyHttpsPort > 0) {
+      proxyPort = legacyHttpsPort;
+    }
+    proxyUseHttps = true;
+  }
+
+  proxyPort = Number.isFinite(proxyPort) ? proxyPort : 0;
+  const proxyEnabledRaw = (cfg.proxyEnabled === undefined) ? DEFAULTS.proxyEnabled : !!cfg.proxyEnabled;
+  const proxyEnabled = proxyEnabledRaw && (proxyHost && proxyPort > 0);
+
   return {
   hasUrl,
   rawUrl,
@@ -229,6 +330,12 @@ function loadConfig() {
     autoReloadEnabled,
   navigateBackEnabled,
   tabTimeoutSec,
+      ntpServer: configuredNtpServer,
+      useSystemTime,
+    proxyHost,
+    proxyPort,
+  proxyUseHttps,
+    proxyEnabled,
     waitForCss: cfg.waitForCss ?? DEFAULTS.waitForCss,
   configPath: usedCfgPath,
   // 2FA persisted state: enabled flag and encrypted secret (if present)
@@ -294,6 +401,7 @@ async function bootstrap() {
   await app.whenReady();
 
   const cfg = loadConfig();
+  applyNtpPreferences(cfg.ntpServer, cfg.useSystemTime);
 
   // 2FA state (enabled flag persisted; secret persisted encrypted like credentials)
   let twoFAEnabled = !!cfg.twoFAEnabled;
@@ -393,12 +501,35 @@ async function bootstrap() {
     await setSessionCookie(sess, cfg.targetUrl, cfg.parentDomain, cfg.sessionVal);
   }
 
+  async function configureProxy(proxyHost, proxyPort, useHttps, enabled) {
+    const { host: cleanHost, port: inlinePort } = splitProxyHost(proxyHost);
+    const providedPort = Number.isFinite(Number(proxyPort)) ? Number(proxyPort) : (inlinePort ?? 0);
+    const portNum = Number.isInteger(providedPort) ? providedPort : Math.floor(providedPort);
+    const allow = !!enabled && !!cleanHost && Number.isInteger(portNum) && portNum > 0;
+    const rules = [];
+    if (allow) {
+      rules.push(`http=${cleanHost}:${portNum}`);
+      if (useHttps) {
+        rules.push(`https=${cleanHost}:${portNum}`);
+      }
+    }
+    const proxyRules = rules.length ? rules.join(';') : 'direct://';
+    try {
+  await sess.setProxy({ proxyRules, proxyBypassRules: 'localhost,127.0.0.1,::1' });
+    } catch (err) {
+      console.error('[electron-auto-reload] Failed to apply proxy settings:', err);
+    }
+  }
+  await configureProxy(cfg.proxyHost, cfg.proxyPort, cfg.proxyUseHttps, cfg.proxyEnabled);
+
   const win = new BrowserWindow({
     show: false,
     fullscreen: true,
     autoHideMenuBar: true,
     backgroundColor: '#000000',
-  icon: appIcon,
+    title: app.getName && typeof app.getName === 'function' ? app.getName() : 'Dashboard Auto Reload',
+    fullscreenWindowTitle: app.getName && typeof app.getName === 'function' ? app.getName() : 'Dashboard Auto Reload',
+    icon: appIcon,
     webPreferences: {
       preload: path.join(__dirname, '..', 'preload', 'preload.js'),
       partition: partitionName,
@@ -423,6 +554,12 @@ async function bootstrap() {
     waitForCss: cfg.waitForCss,
   keepAliveSec: cfg.keepAliveSec,
     user: cfg.user,
+  ntpServer: cfg.ntpServer,
+  useSystemTime: cfg.useSystemTime,
+  proxyHost: cfg.proxyHost,
+  proxyPort: cfg.proxyPort,
+  proxyUseHttps: cfg.proxyUseHttps,
+  proxyEnabled: cfg.proxyEnabled,
   autoReloadEnabled: cfg.autoReloadEnabled,
   navigateBackEnabled: cfg.navigateBackEnabled,
   tabTimeoutSec: cfg.tabTimeoutSec
@@ -475,8 +612,47 @@ async function bootstrap() {
   ipcMain.handle('get-ntp-status', () => ({
     offsetMs: ntpOffsetMs,
     lastSync: lastNtpSync,
-    usingSystemTime: ntpOffsetMs === 0
+    usingSystemTime: useSystemTimePreference
   }));
+  ipcMain.handle('set-ntp-preference', async (_event, payload) => {
+    try {
+      const server = payload && Object.prototype.hasOwnProperty.call(payload, 'server') ? payload.server : cfg.ntpServer;
+      const useLocal = payload && Object.prototype.hasOwnProperty.call(payload, 'useSystemTime') ? !!payload.useSystemTime : cfg.useSystemTime;
+      applyNtpPreferences(server, useLocal);
+      if (Array.isArray(server)) {
+        cfg.ntpServer = server.map((val) => String(val || '').trim()).filter(Boolean).join(', ');
+      } else if (typeof server === 'string') {
+        cfg.ntpServer = server.trim();
+      }
+      const parsedServers = parseNtpServers(server);
+      cfg.useSystemTime = useLocal || parsedServers.length === 0;
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err && err.message ? err.message : err) };
+    }
+  });
+  ipcMain.handle('set-proxy-preference', async (_event, payload) => {
+    try {
+      const hostRaw = (payload && typeof payload.host === 'string') ? payload.host : (cfg.proxyHost || '');
+      const parsedHost = splitProxyHost(hostRaw);
+      const cleanHost = parsedHost.host;
+      const portRaw = payload && Object.prototype.hasOwnProperty.call(payload, 'port') ? Number(payload.port) : Number(cfg.proxyPort);
+      let port = Number.isFinite(portRaw) ? Math.max(0, Math.floor(portRaw)) : 0;
+      if ((!port || port <= 0) && Number.isFinite(parsedHost.port) && parsedHost.port > 0) {
+        port = parsedHost.port;
+      }
+      const useHttpsRaw = payload && Object.prototype.hasOwnProperty.call(payload, 'useHttps') ? payload.useHttps : cfg.proxyUseHttps;
+      const enabled = !!(payload && Object.prototype.hasOwnProperty.call(payload, 'enabled') ? payload.enabled : cfg.proxyEnabled);
+      cfg.proxyHost = cleanHost;
+      cfg.proxyPort = port;
+    cfg.proxyUseHttps = !!useHttpsRaw;
+    cfg.proxyEnabled = !!enabled && (cleanHost && port > 0);
+  await configureProxy(cfg.proxyHost, cfg.proxyPort, cfg.proxyUseHttps, cfg.proxyEnabled);
+  return { ok: true, enabled: cfg.proxyEnabled, useHttps: cfg.proxyUseHttps };
+    } catch (err) {
+      return { ok: false, error: String(err && err.message ? err.message : err) };
+    }
+  });
   ipcMain.handle('remove-2fa-secret', async () => {
     twoFASecret = '';
     try {
@@ -526,6 +702,39 @@ async function bootstrap() {
       let navBack = (newCfg.navigateBackEnabled !== undefined) ? !!newCfg.navigateBackEnabled : cfg.navigateBackEnabled;
       if (!Number.isFinite(desiredTabTimeout) || desiredTabTimeout <= 0) navBack = false;
 
+      let nextNtpServer = cfg.ntpServer || '';
+      if (newCfg.ntpServer !== undefined) {
+        if (Array.isArray(newCfg.ntpServer)) {
+          const cleaned = newCfg.ntpServer.map((val) => String(val || '').trim()).filter(Boolean);
+          nextNtpServer = cleaned.join(', ');
+        } else if (typeof newCfg.ntpServer === 'string') {
+          const trimmed = newCfg.ntpServer.trim();
+          nextNtpServer = trimmed;
+        }
+      }
+  const nextUseSystem = (newCfg.useSystemTime !== undefined)
+    ? !!newCfg.useSystemTime
+    : !!cfg.useSystemTime;
+      const requestedProxyHost = (newCfg.proxyHost !== undefined) ? newCfg.proxyHost : cfg.proxyHost;
+      const parsedNextProxy = splitProxyHost(requestedProxyHost);
+      const nextProxyHost = parsedNextProxy.host || '';
+      let nextProxyPort = (() => {
+        const candidate = Number(newCfg.proxyPort);
+        if (Number.isFinite(candidate)) return candidate;
+        if (Number.isFinite(parsedNextProxy.port)) return parsedNextProxy.port;
+        const existing = Number(cfg.proxyPort);
+        return Number.isFinite(existing) ? existing : 0;
+      })();
+      if (!Number.isInteger(nextProxyPort) || nextProxyPort < 0) {
+        nextProxyPort = 0;
+      }
+      const nextProxyUseHttps = (newCfg.proxyUseHttps !== undefined)
+        ? !!newCfg.proxyUseHttps
+        : !!cfg.proxyUseHttps;
+      const nextProxyEnabled = !!newCfg.proxyEnabled && (
+        nextProxyHost && nextProxyPort > 0
+      );
+
   const merged = {
         url: (typeof newCfg.url === 'string') ? newCfg.url : (cfg.hasUrl ? cfg.targetUrl : ''),
         session: newCfg.session || cfg.sessionVal || '',
@@ -536,7 +745,13 @@ async function bootstrap() {
   timeWindow: nextTW,
         autoReloadEnabled: autoEnabled,
         navigateBackEnabled: navBack,
-        tabTimeoutSec: Number.isFinite(desiredTabTimeout) ? desiredTabTimeout : 600,
+    tabTimeoutSec: Number.isFinite(desiredTabTimeout) ? desiredTabTimeout : 600,
+    ntpServer: nextNtpServer,
+        useSystemTime: nextUseSystem,
+        proxyHost: nextProxyHost,
+        proxyPort: nextProxyPort,
+        proxyUseHttps: nextProxyUseHttps,
+        proxyEnabled: nextProxyEnabled,
         twoFAEnabled: twoFAEnabled
       };
 
@@ -606,7 +821,16 @@ async function bootstrap() {
   cfg.navigateBackEnabled = cfg.hasUrl ? merged.navigateBackEnabled : false;
   cfg.tabTimeoutSec = merged.tabTimeoutSec;
   cfg.twoFAEnabled = merged.twoFAEnabled;
+  cfg.ntpServer = merged.ntpServer;
+  cfg.useSystemTime = merged.useSystemTime;
+  cfg.proxyHost = merged.proxyHost;
+  cfg.proxyPort = merged.proxyPort;
+  cfg.proxyUseHttps = merged.proxyUseHttps;
+  cfg.proxyEnabled = merged.proxyEnabled;
   if (cfg.autoReloadEnabled && cfg.reloadAfterSec > 0) { try { lastAutoReloadStart = Date.now(); } catch {} }
+
+  await configureProxy(cfg.proxyHost, cfg.proxyPort, cfg.proxyUseHttps, cfg.proxyEnabled);
+  applyNtpPreferences(cfg.ntpServer, cfg.useSystemTime);
 
   // Update target base for watchdog and reset grace timer
   targetBase = cfg.hasUrl ? stripFromTo(cfg.targetUrl) : 'about:blank';
@@ -787,6 +1011,9 @@ async function bootstrap() {
   let autoReloadPausedDueToNavigate = false;
   // Track if navigate-back itself is paused explicitly due to a login page
   let navigateBackPausedForLogin = false;
+  let loginPauseSince = null;
+  let nextLoginRetryAt = 0;
+  const LOGIN_RETRY_INTERVAL_MS = 30 * 1000; // retry login flow every 30 seconds while stalled
   const ensureTargetUrl = () => {
     try {
       const current = win.webContents.getURL();
@@ -807,17 +1034,44 @@ async function bootstrap() {
         } catch {}
         if (isLoginPage) {
           // Pause navigate-back logic entirely while on login pages
-          navigateBackPausedForLogin = true;
+          if (!navigateBackPausedForLogin) {
+            navigateBackPausedForLogin = true;
+            loginPauseSince = Date.now();
+            nextLoginRetryAt = loginPauseSince + LOGIN_RETRY_INTERVAL_MS;
+          } else if (!loginPauseSince) {
+            loginPauseSince = Date.now();
+            nextLoginRetryAt = loginPauseSince + LOGIN_RETRY_INTERVAL_MS;
+          }
           offTargetSince = null; // reset any prior deviation timer
           // Pause autoReload while on login (only once)
           if (cfg.autoReloadEnabled && !autoReloadPausedDueToNavigate) {
             try { win.webContents.send('auto-reload-stop'); } catch {}
             autoReloadPausedDueToNavigate = true;
           }
+          const nowTs = Date.now();
+          if (loginPauseSince && nowTs >= nextLoginRetryAt) {
+            try {
+              // Navigate to the app's final URL (same logic as initial load) to restart the flow
+              const desiredWin = computeWindow(cfg.timeWindow.start);
+              const dest = cfg.timeWindow.enabled ? withWindowParams(cfg.targetUrl, desiredWin) : cfg.targetUrl;
+              console.log('[electron-auto-reload] Login pause exceeded; navigating to final URL:', dest);
+              if (!win.isDestroyed()) {
+                try { win.loadURL(dest).catch(() => {}); } catch {}
+              }
+              // After forcing navigation, retry again in at most 10 seconds if we are still stuck
+              nextLoginRetryAt = nowTs + 10 * 1000;
+            } catch (err) {
+              console.error('[electron-auto-reload] Failed to retry login by navigation:', err);
+              // If navigation failed, fall back to scheduling the standard interval
+              nextLoginRetryAt = nowTs + LOGIN_RETRY_INTERVAL_MS;
+            }
+          }
           return; // do not proceed with navigate-back timing
         } else if (navigateBackPausedForLogin) {
           // Leaving login page; resume navigate-back timing fresh
           navigateBackPausedForLogin = false;
+          loginPauseSince = null;
+          nextLoginRetryAt = 0;
           offTargetSince = null;
         }
         if (!offTargetSince) {
@@ -845,6 +1099,8 @@ async function bootstrap() {
         // Back on target; clear any grace timer
   if (offTargetSince) offTargetSince = null;
   navigateBackPausedForLogin = false;
+  loginPauseSince = null;
+  nextLoginRetryAt = 0;
         // Resume autoReload if it was paused due to navigate-back
         if (autoReloadPausedDueToNavigate && cfg.autoReloadEnabled && cfg.reloadAfterSec > 0) {
           try { lastAutoReloadStart = Date.now(); } catch {}
@@ -918,7 +1174,12 @@ async function bootstrap() {
       }
       if (cfg.navigateBackEnabled && cfg.tabTimeoutSec > 0) {
         if (navigateBackPausedForLogin) {
-          segs.push('navigateBack paused(login)');
+          const pausedFor = loginPauseSince ? Math.max(0, Math.round((now - loginPauseSince) / 1000)) : 0;
+          const retryIn = nextLoginRetryAt > now ? Math.max(0, Math.round((nextLoginRetryAt - now) / 1000)) : 0;
+          const detail = retryIn > 0
+            ? `navigateBack paused(login ${pausedFor}s, retry in ${retryIn}s)`
+            : `navigateBack paused(login ${pausedFor}s, retrying)`;
+          segs.push(detail);
         } else if (offTargetSince) {
           const graceMs = cfg.tabTimeoutSec * 1000;
           const elapsed = now - offTargetSince;
@@ -971,6 +1232,10 @@ async function bootstrap() {
       if (offTargetSince) {
         // Give full grace again on interaction
         offTargetSince = Date.now();
+      }
+      if (navigateBackPausedForLogin) {
+        loginPauseSince = Date.now();
+        nextLoginRetryAt = loginPauseSince + LOGIN_RETRY_INTERVAL_MS;
       }
     } catch {}
   });
@@ -1056,6 +1321,22 @@ async function bootstrap() {
     { label: 'Quit', role: 'quit' }
   ]);
   Menu.setApplicationMenu(menu);
+
+  // Suppress noisy DevTools Autofill protocol errors on Chromium builds without the domain
+  const suppressedDevtoolsMessages = [
+    'Request Autofill.enable failed',
+    'Request Autofill.setAddresses failed'
+  ];
+  win.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    try {
+      if (typeof message === 'string' && sourceId && sourceId.startsWith('devtools://')) {
+        if (suppressedDevtoolsMessages.some(txt => message.indexOf(txt) !== -1)) {
+          if (event && typeof event.preventDefault === 'function') event.preventDefault();
+          return;
+        }
+      }
+    } catch {}
+  });
 
   try {
     if (cfg.hasUrl) {

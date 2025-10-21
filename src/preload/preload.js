@@ -16,18 +16,46 @@ const { contextBridge, ipcRenderer } = require('electron');
       refreshCode();
       const codeTimer = setInterval(refreshCode, 600); // slightly faster cadence
 
+      // Throttling: when server says too many attempts, wait 5 minutes
+      const FIVE_MIN = 5 * 60 * 1000;
+      let lockUntil = Number.isFinite(window.__twoFALockUntil) ? Number(window.__twoFALockUntil) : 0;
+      let lockLogTimer = window.__twoFALockLogTimer || null;
+
+      function formatRemain(ms){
+        const sec = Math.max(0, Math.ceil(ms/1000));
+        const m = Math.floor(sec/60), s = sec%60;
+        return `${m}m ${s}s`;
+      }
+
+      function hasTooManyAttemptsMessage(){
+        try {
+          // Precise detection per provided markup
+          const el = document.querySelector('[data-error-code="too-many-failures"]');
+          if (el && (el.textContent||'').toLowerCase().includes('too many failed codes')) return true;
+          // Fallback: text scan
+          const txt = (document.body && (document.body.innerText || document.body.textContent)) || '';
+          if (!txt) return false;
+          const s = txt.toLowerCase();
+          const tooMany = s.includes('too many failed codes') || (s.includes('too many') && (s.includes('code') || s.includes('codes') || s.includes('attempt')));
+          const waitMsg = /wait\s+\d+\s*minute/.test(s) || s.includes('wait for some minutes');
+          return tooMany || waitMsg;
+        } catch { return false; }
+      }
+
       function typeChars(el, text){
         try {
           el.focus();
-          el.value=''; el.dispatchEvent(new Event('input',{bubbles:true}));
-          for (const ch of text){
-            el.dispatchEvent(new KeyboardEvent('keydown',{bubbles:true,key:ch}));
-            el.dispatchEvent(new KeyboardEvent('keypress',{bubbles:true,key:ch}));
-            el.value += ch;
-            el.dispatchEvent(new Event('input',{bubbles:true}));
-            el.dispatchEvent(new KeyboardEvent('keyup',{bubbles:true,key:ch}));
+          // Fill in a single shot instead of per-character typing
+          const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+          if (setter) {
+            setter.call(el, '');
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            setter.call(el, String(text ?? ''));
+          } else {
+            el.value = String(text ?? '');
           }
-          el.dispatchEvent(new Event('change',{bubbles:true}));
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
         } catch {}
       }
 
@@ -60,49 +88,76 @@ const { contextBridge, ipcRenderer } = require('electron');
         if (window.__twoFASubmitted) return;
         // Blur input so some frameworks validate
         try { input.blur(); } catch {}
+        // Single attempt: click once and mark submitted to avoid retries
         fireClick(btn);
-        if (!window.__twoFASubmitted) {
-          // Simulate Enter key on input if click didn't trigger
-          try {
-            input.focus();
-            ['keydown','keypress','keyup'].forEach(k=> input.dispatchEvent(new KeyboardEvent(k,{bubbles:true,key:'Enter',code:'Enter'})));
-          } catch {}
-        }
-        // Rapid rAF burst attempts for up to 800ms until navigation/submit is detected
-        if (!window.__twoFABurstLoop) {
-          window.__twoFABurstLoop = true;
-          const start = performance.now();
-          (function burst(){
-            if (window.__twoFASubmitted) return;
-            const elapsed = performance.now()-start;
-            if (btn && !(btn.disabled||btn.getAttribute('aria-disabled')==='true')) {
-              fireClick(btn);
-            }
-            if (!window.__twoFASubmitted && elapsed < 800) requestAnimationFrame(burst);
-          })();
-          // Timed ultimate fallback: raw form submit after 900ms
-          setTimeout(()=>{
-            if (!window.__twoFASubmitted && form) {
-              try { (form.requestSubmit?form.requestSubmit():form.submit()); window.__twoFASubmitted = true; } catch {}
-            }
-          },900);
-        }
+        window.__twoFASubmitted = true;
+        // Safety: if click didn't trigger submit handlers, send Enter once
+        try {
+          input.focus();
+          ['keydown','keypress','keyup'].forEach(k=> input.dispatchEvent(new KeyboardEvent(k,{bubbles:true,key:'Enter',code:'Enter'})));
+        } catch {}
       }
 
       const start = performance.now();
       let afterFillBurst = false;
       function attempt(){
         if (!active || window.__twoFASubmitted) return;
+        const now = Date.now();
+        // Respect lock window (e.g., after "too many failed codes")
+        if (lockUntil && now < lockUntil) {
+          // Periodic log while waiting
+          if (!lockLogTimer) {
+            lockLogTimer = setInterval(()=>{
+              const remain = Math.max(0, (lockUntil - Date.now()));
+              try { console.log(`[2FA] Waiting due to throttle: ${formatRemain(remain)} remaining (until ${new Date(lockUntil).toLocaleTimeString()})`); } catch {}
+              if (Date.now() >= lockUntil) { try { clearInterval(lockLogTimer); } catch {}; lockLogTimer = null; window.__twoFALockLogTimer = null; }
+            }, 30000); // log every 30s
+            window.__twoFALockLogTimer = lockLogTimer;
+          }
+          const delay = Math.min(5000, lockUntil - now);
+          setTimeout(attempt, Math.max(500, delay));
+          return;
+        } else if (lockUntil && now >= lockUntil) {
+          // Lock expired, clear any log timer
+          if (lockLogTimer) { try { clearInterval(lockLogTimer); } catch {}; lockLogTimer = null; window.__twoFALockLogTimer = null; }
+        }
+        // If page shows throttle message, set lock for five minutes and pause attempts
+        if (hasTooManyAttemptsMessage()) {
+          if (!lockUntil || now >= lockUntil) {
+            lockUntil = Date.now() + FIVE_MIN;
+            window.__twoFALockUntil = lockUntil;
+            try { console.log(`[2FA] Throttled: Too many failed codes. Waiting 5 minutes (until ${new Date(lockUntil).toLocaleTimeString()}) before retrying.`); } catch {}
+            // Start periodic log timer immediately
+            if (!lockLogTimer) {
+              lockLogTimer = setInterval(()=>{
+                const remain = Math.max(0, (lockUntil - Date.now()));
+                try { console.log(`[2FA] Waiting due to throttle: ${formatRemain(remain)} remaining (until ${new Date(lockUntil).toLocaleTimeString()})`); } catch {}
+                if (Date.now() >= lockUntil) { try { clearInterval(lockLogTimer); } catch {}; lockLogTimer = null; window.__twoFALockLogTimer = null; }
+              }, 30000);
+              window.__twoFALockLogTimer = lockLogTimer;
+            }
+          }
+          setTimeout(attempt, 5000);
+          return;
+        }
         const code = window.__currentTOTPCode || lastCode;
         const elapsed = performance.now() - start;
-        if (elapsed > 10000) { stop(); return; } // hard cap 10s
+        if (elapsed > 10000) { // hard cap 10s unless we're in lock mode
+          if (lockUntil && Date.now() < lockUntil) {
+            // Keep observer alive; schedule next check near lock expiry
+            const delay = Math.min(5000, lockUntil - Date.now());
+            setTimeout(attempt, Math.max(500, delay));
+            return;
+          }
+          stop(); return;
+        }
         if (!code || code.length < 6){ queueNext(); return; }
         let el=null; for (const s of selectors){ const c=document.querySelector(s); if (c){ el=c; break; } }
         if (!el){ queueNext(); return; }
         if (el.value.trim() !== code) {
           typeChars(el, code);
-          // Start an intense burst loop immediately after first full fill
-          if (!afterFillBurst) { afterFillBurst = true; continuousSubmit(el); }
+          // Do not burst-submit; we'll submit once below
+          afterFillBurst = true;
         }
         submit(el);
         if (window.__twoFASubmitted) { stop(); return; }
@@ -115,23 +170,7 @@ const { contextBridge, ipcRenderer } = require('electron');
         else if (elapsed<5000) { setTimeout(attempt,30); }
         else { setTimeout(attempt,120); }
       }
-      function continuousSubmit(input){
-        const form = input.form || input.closest('form');
-        let frames = 0;
-        (function loop(){
-          if (window.__twoFASubmitted || !active) return;
-            frames++;
-            const btn = form?.querySelector('button[data-action-button-primary="true"], button[type="submit"], input[type="submit"]') || document.querySelector('button[data-action-button-primary="true"], button[type="submit"], input[type="submit"]');
-            if (btn && !(btn.disabled||btn.getAttribute('aria-disabled')==='true')) {
-              fireClick(btn);
-              // Also press Enter occasionally to trigger any onKey handlers
-              if (frames % 5 === 0) {
-                ['keydown','keypress','keyup'].forEach(k=> input.dispatchEvent(new KeyboardEvent(k,{bubbles:true,key:'Enter',code:'Enter'})));
-              }
-            }
-            if (!window.__twoFASubmitted && frames < 120) requestAnimationFrame(loop);
-        })();
-      }
+      // Removed aggressive continuousSubmit; we attempt only once per page load
       const mo = new MutationObserver(()=>attempt());
       try { mo.observe(document.documentElement||document,{childList:true,subtree:true}); } catch {}
       function stop(){ active=false; clearInterval(codeTimer); try{ mo.disconnect(); }catch{} }
@@ -168,6 +207,172 @@ async function applyBehaviors() {
   // If redirected to login, attempt auto-fill if credentials are provided
   async function tryLogin() {
     if (!user.email || !user.password) return false;
+
+    const loginLog = (step, details) => {
+      try {
+        const suffix = details ? ` | ${details}` : '';
+        console.log(`[auto-login] ${step}${suffix}`);
+      } catch {}
+    };
+
+    const describeBtnState = (btn) => {
+      if (!btn) return 'absent';
+      const aria = btn.getAttribute('aria-disabled');
+      return `disabled=${btn.disabled} aria-disabled=${aria ?? ''} class="${btn.className || ''}"`;
+    };
+
+    const monitorButtonState = (btn, label) => {
+      if (!btn) return;
+      const logState = (reason) => loginLog(`${label}-${reason}`, describeBtnState(btn));
+      logState('initial');
+      let lastSnapshot = describeBtnState(btn);
+      try {
+        const observer = new MutationObserver(() => {
+          const snap = describeBtnState(btn);
+          if (snap !== lastSnapshot) {
+            lastSnapshot = snap;
+            logState('mutation');
+          }
+        });
+        observer.observe(btn, { attributes: true, attributeFilter: ['class', 'disabled', 'aria-disabled'] });
+        setTimeout(() => { logState('after-2s'); }, 2000);
+        setTimeout(() => {
+          logState('after-5s');
+          try { observer.disconnect(); } catch {}
+        }, 5000);
+      } catch {}
+    };
+
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+
+    const setNativeValue = (el, value) => {
+      try {
+        if (nativeInputValueSetter) {
+          nativeInputValueSetter.call(el, value);
+        } else {
+          el.value = value;
+        }
+      } catch {
+        el.value = value;
+      }
+    };
+
+    const keyCodeForChar = (ch) => {
+      if (!ch || typeof ch !== 'string') return { code: 'KeyA', keyCode: 65 };
+      if (/^[a-z]$/i.test(ch)) return { code: `Key${ch.toUpperCase()}`, keyCode: ch.toUpperCase().charCodeAt(0) };
+      if (/^[0-9]$/.test(ch)) return { code: `Digit${ch}`, keyCode: ch.charCodeAt(0) };
+      switch (ch) {
+        case '@': return { code: 'Digit2', keyCode: 50 };
+        case '.': return { code: 'Period', keyCode: 190 };
+        case '-': return { code: 'Minus', keyCode: 189 };
+        case '_': return { code: 'Minus', keyCode: 189 };
+        case '\\': return { code: 'Backslash', keyCode: 220 };
+        default: return { code: `Key${ch.toUpperCase()}`, keyCode: ch.charCodeAt(0) || 65 };
+      }
+    };
+
+    async function simulateTyping(input, text, label) {
+      // Single-shot fill (no per-character events)
+      const val = String(text ?? '');
+      loginLog(`${label}-fill-start`, `len=${val.length}`);
+      setNativeValue(input, '');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      setNativeValue(input, val);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await sleep(60);
+      loginLog(`${label}-fill-complete`, `len=${val.length}`);
+    }
+
+    const pointerTap = (element) => {
+      try {
+        const rect = element.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        ['pointerdown', 'mousedown', 'mouseup', 'pointerup', 'click'].forEach((type) => {
+          try { element.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX: cx, clientY: cy })); } catch {}
+        });
+      } catch {}
+    };
+
+    async function attemptClickSequence(btn, label, options = {}) {
+      const { pokeWhileDisabled = true } = options;
+      monitorButtonState(btn, label);
+      loginLog(`${label}-attempt`, describeBtnState(btn));
+      if (!pokeWhileDisabled) {
+        try { btn.focus(); } catch {}
+      }
+      const start = Date.now();
+      while (Date.now() - start < 15000) {
+        const disabled = btn.disabled || btn.getAttribute('aria-disabled') === 'true';
+        if (!disabled) {
+          loginLog(`${label}-enabled`, describeBtnState(btn));
+          try { btn.focus(); } catch {}
+          pointerTap(btn);
+          try {
+            btn.click();
+            loginLog(`${label}-click-dispatched`, describeBtnState(btn));
+          } catch (err) {
+            loginLog(`${label}-click-error`, err && err.message ? err.message : String(err));
+          }
+          await sleep(600);
+          return true;
+        }
+        if (pokeWhileDisabled) pointerTap(btn);
+        await sleep(150);
+      }
+      loginLog(`${label}-timeout-disabled`, describeBtnState(btn));
+      const form = btn.form || btn.closest('form');
+      if (form) {
+        loginLog(`${label}-fallback-submit`);
+        try {
+          if (typeof form.requestSubmit === 'function') {
+            form.requestSubmit(btn);
+          } else {
+            form.submit();
+          }
+          loginLog(`${label}-fallback-dispatched`);
+          return true;
+        } catch (err) {
+          loginLog(`${label}-fallback-error`, err && err.message ? err.message : String(err));
+        }
+      }
+      return false;
+    }
+
+    async function waitForValue(element, predicate, timeoutMs, label) {
+      const start = Date.now();
+      while (Date.now() - start < timeoutMs) {
+        try {
+          if (predicate(element)) return true;
+        } catch {}
+        await sleep(60);
+      }
+      loginLog(`${label}-timeout`);
+      return false;
+    }
+
+    async function sendKeyStroke(target, key, code, keyCode, label) {
+      if (!target) return;
+      const eventInit = {
+        bubbles: true,
+        key,
+        code,
+        keyCode,
+        which: keyCode
+      };
+      loginLog(`${label}-keydown`);
+      try { target.dispatchEvent(new KeyboardEvent('keydown', eventInit)); } catch {}
+      try { target.dispatchEvent(new KeyboardEvent('keypress', eventInit)); } catch {}
+      try { target.dispatchEvent(new KeyboardEvent('keyup', eventInit)); } catch {}
+      await sleep(40);
+    }
+
+    async function sendEnter(target, label) {
+      await sendKeyStroke(target, 'Enter', 'Enter', 13, label);
+    }
+
+    loginLog('start', location.href);
 
     // Heuristics for Microsoft AAD/Siemens login pages
     const emailSel = ['#username', 'input[name="loginfmt"]', 'input[type="email"]', 'input[name="username"]'];
@@ -285,19 +490,49 @@ async function applyBehaviors() {
     // Phase 1: email
     const emailInput = findAny(emailSel);
     if (emailInput) {
+      loginLog('email-found', emailInput.outerHTML.slice(0, 120));
       emailInput.focus();
-      emailInput.value = '';
-      emailInput.dispatchEvent(new Event('input', { bubbles: true }));
-      emailInput.value = user.email;
-      emailInput.dispatchEvent(new Event('input', { bubbles: true }));
+      await simulateTyping(emailInput, user.email, 'email-input');
+      await sendKeyStroke(emailInput, 'Tab', 'Tab', 9, 'email-tab');
+      await sleep(120);
       // Wait for Cloudflare/Turnstile token readiness before continuing
-      try { await waitForCaptcha(90000); } catch {}
-  const nextBtn = findAny(nextSel);
-  // Try ticking known checkboxes early if present on step 1
-  try { clickKnownCheckboxes(); } catch {}
-  if (nextBtn) nextBtn.click();
-  // After moving to next step, keep trying to tick checkboxes for a bit
-  ensureCheckboxes(12000).catch(()=>{});
+      let captchaReady = false;
+      try {
+        captchaReady = await waitForCaptcha(90000);
+      } catch (err) {
+        loginLog('email-captcha-error', err && err.message ? err.message : String(err));
+      }
+      loginLog('email-captcha-ready', String(captchaReady));
+      const nextBtn = findAny(nextSel);
+      // Try ticking known checkboxes early if present on step 1
+      try { clickKnownCheckboxes(); } catch {}
+      let passwordVisiblePreSubmit = findAny(passSel);
+      if (!passwordVisiblePreSubmit) {
+        const waitStart = Date.now();
+        while (!passwordVisiblePreSubmit && Date.now() - waitStart < 800) {
+          await sleep(80);
+          passwordVisiblePreSubmit = findAny(passSel);
+        }
+      }
+      if (passwordVisiblePreSubmit) {
+        loginLog('password-visible-pre-submit', passwordVisiblePreSubmit.outerHTML.slice(0, 120));
+      } else if (nextBtn) {
+        const btnText = ((nextBtn.textContent || '').trim().toLowerCase());
+        const continueWords = ['next', 'continue', 'proceed', 'verify', 'email'];
+        const isContinue = continueWords.some(word => btnText.includes(word));
+        if (isContinue) {
+          loginLog('email-submit-continue', btnText || '(no-text)');
+          await attemptClickSequence(nextBtn, 'email-submit', { pokeWhileDisabled: true });
+        } else {
+          loginLog('email-submit-skipped', btnText || '(no-text)');
+        }
+      } else {
+        loginLog('email-submit-missing');
+      }
+      // After moving to next step, keep trying to tick checkboxes for a bit
+      ensureCheckboxes(12000).catch(() => {});
+    } else {
+      loginLog('email-input-missing');
     }
 
     // Wait briefly for password to appear
@@ -307,19 +542,31 @@ async function applyBehaviors() {
       tries++;
     }
 
-  const passInput = findAny(passSel);
+    const passInput = findAny(passSel);
     if (passInput) {
+      loginLog('password-found', passInput.outerHTML.slice(0, 120));
       passInput.focus();
-      passInput.value = '';
-      passInput.dispatchEvent(new Event('input', { bubbles: true }));
-      passInput.value = user.password;
-      passInput.dispatchEvent(new Event('input', { bubbles: true }));
+      await simulateTyping(passInput, user.password, 'password-input');
+      const filled = await waitForValue(passInput, (el) => el && el.value === user.password, 5000, 'password-filled');
+      loginLog('password-filled-status', `match=${filled} len=${passInput.value.length}`);
+      try {
+        passInput.dispatchEvent(new Event('input', { bubbles: true }));
+        passInput.dispatchEvent(new Event('change', { bubbles: true }));
+      } catch {}
+      try { passInput.blur(); } catch {}
+      await sleep(120);
+      await sendEnter(passInput, 'password-enter');
 
       // Find a submit button on the password page
       const nextBtn2 = findAny(['#idSIButton9', 'button[type="submit"]', 'input[type="submit"]']);
       // Try ticking known checkboxes prior to submitting password step
       try { clickKnownCheckboxes(); } catch {}
-  if (nextBtn2) nextBtn2.click();
+      if (nextBtn2) {
+        loginLog('password-submit-found', nextBtn2.outerHTML.slice(0, 120));
+        await attemptClickSequence(nextBtn2, 'password-submit', { pokeWhileDisabled: false });
+      } else {
+        loginLog('password-submit-missing');
+      }
 
       // Optionally handle "Stay signed in" prompt
       setTimeout(() => {
@@ -327,19 +574,29 @@ async function applyBehaviors() {
         const stayYes = document.querySelector('#idSIButton9');
         if (stayYes) try { stayYes.click(); } catch {}
       }, 1500);
-  // And keep trying for a while as that prompt can appear late
-  ensureCheckboxes(15000).catch(()=>{});
+      // And keep trying for a while as that prompt can appear late
+      ensureCheckboxes(15000).catch(() => {});
 
       // If a CAPTCHA interrupts at this stage, wait for solve then try submit again (once)
       try {
         const solved = await waitForCaptcha(90000);
+        loginLog('password-captcha-result', String(solved));
         if (solved) {
           const submitAgain = findAny(['#idSIButton9', 'button[type="submit"]', 'input[type="submit"]']);
-          if (submitAgain) submitAgain.click();
+          if (submitAgain) {
+            loginLog('password-submit-retry-found', submitAgain.outerHTML.slice(0, 120));
+            await attemptClickSequence(submitAgain, 'password-submit-retry', { pokeWhileDisabled: false });
+          } else {
+            loginLog('password-submit-retry-missing');
+          }
         }
-      } catch {}
+      } catch (err) {
+        loginLog('password-captcha-error', err && err.message ? err.message : String(err));
+      }
+      loginLog('password-step-complete');
       return true;
     }
+    loginLog('password-input-missing');
     return !!emailInput;
   }
 
