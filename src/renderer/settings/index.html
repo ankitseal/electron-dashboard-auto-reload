@@ -139,6 +139,9 @@
     .toast.show { opacity:1; transform: translateY(0); }
     a { color: var(--accent); text-decoration:none; }
     a:hover { text-decoration:underline; }
+    .addrList { display:flex; flex-wrap:wrap; gap:8px; margin-top:6px; }
+    .addrCopy { background: var(--bg-alt); color: var(--accent); border:1px solid var(--border); padding:6px 10px; border-radius:8px; font-size:12px; cursor:pointer; box-shadow: var(--shadow-sm); }
+    .addrCopy:hover { border-color: var(--accent); }
   </style>
 </head>
 <body>
@@ -159,6 +162,34 @@
       <input id="url" type="text" placeholder="https://..." />
   <label>SESSION <span class="help" title="Managed automatically and cannot be edited here.">?</span></label>
   <input id="session" type="text" placeholder="auto-managed" disabled />
+    </fieldset>
+
+    <fieldset>
+      <legend>Web Relay</legend>
+      <label class="toggle">
+        <span class="toggle-text">
+          Enable local/open server
+          <span class="help" title="Starts a tiny HTTP server to accept /open requests and navigate the existing window. By default binds to 0.0.0.0 on port 793 (reachable from LAN).">?</span>
+        </span>
+        <input id="loopEnabled" type="checkbox" />
+      </label>
+      <div id="loopFields" class="collapsible" data-open="false" style="margin-top:8px;">
+        <div class="row">
+          <div style="grid-column: 1 / -1;">
+            <label>Access URLs</label>
+            <div id="serverLan" class="helptext">—</div>
+          </div>
+          <div>
+            <label>Port</label>
+            <input id="loopPort" type="number" min="1" max="65535" step="1" placeholder="793" />
+          </div>
+        </div>
+        <label class="toggle" style="margin-top:12px;">
+          <span class="toggle-text">Minimize to tray while server runs</span>
+          <input id="minimizeToTray" type="checkbox" />
+        </label>
+  <div class="helptext">Security: When bound to 0.0.0.0, the endpoint is reachable from your LAN (http://&lt;lan-ip&gt;:793/). Use OS firewall rules or network segmentation as needed.</div>
+      </div>
     </fieldset>
 
     <fieldset>
@@ -421,6 +452,27 @@
   setVal('proxyHost', cfg.proxyHost || '');
   setVal('proxyPort', Number.isFinite(Number(cfg.proxyPort)) && Number(cfg.proxyPort) > 0 ? Number(cfg.proxyPort) : '');
   setChk('proxyUseHttps', cfg.proxyUseHttps === undefined ? true : !!cfg.proxyUseHttps);
+  // Loopback
+  setChk('loopEnabled', !!cfg.loopback?.enabled);
+  const lf = document.getElementById('loopFields');
+  if (lf) lf.dataset.open = cfg.loopback?.enabled ? 'true' : 'false';
+  const lan = document.getElementById('serverLan');
+  const port = (cfg.serverInfo?.port || 793);
+  const addrsRaw = Array.isArray(cfg.serverInfo?.addresses) ? cfg.serverInfo.addresses : [];
+  const unique = Array.from(new Set(addrsRaw.filter(Boolean)));
+  if (lan) {
+    if (unique.length) {
+      lan.innerHTML = '<div class="addrList">' + unique.map(ip => {
+        const u = 'http://' + ip + ':' + port + '/';
+        return '<button type="button" class="addrCopy" data-url="'+u+'">'+u+'</button>';
+      }).join('') + '</div>';
+    } else {
+      lan.textContent = '—';
+    }
+  }
+  const loopPortInput = document.getElementById('loopPort');
+  if (loopPortInput) loopPortInput.value = Number.isFinite(Number(cfg.loopback?.port)) && Number(cfg.loopback.port) > 0 ? Number(cfg.loopback.port) : 793;
+  setChk('minimizeToTray', !!cfg.loopback?.minimizeToTray);
   setChk('twEnabled', cfg.timeWindow?.enabled);
   // Default twStart to 12:00 when enabled but missing
   const startVal = (cfg.timeWindow?.enabled && (!cfg.timeWindow?.start || !String(cfg.timeWindow.start).trim())) ? '12:00' : cfg.timeWindow?.start;
@@ -484,11 +536,44 @@
   proxyHost: sanitizeProxyHostValue(val('proxyHost'), document.getElementById('proxyPort')),
   proxyPort: Number(document.getElementById('proxyPort').value),
   proxyUseHttps: document.getElementById('proxyUseHttps') ? document.getElementById('proxyUseHttps').checked : false
+      ,
+  loopback: {
+    enabled: document.getElementById('loopEnabled').checked,
+    port: Number(document.getElementById('loopPort').value) || 793,
+    minimizeToTray: document.getElementById('minimizeToTray').checked
+  }
       };
       const st = document.getElementById('status');
       try {
         const res = await api.saveConfig(payload);
-        if (res && res.ok) { st.textContent = 'Saved'; st.classList.remove('error'); showToast('Settings saved'); }
+        if (res && res.ok) { st.textContent = 'Saved'; st.classList.remove('error');
+          if (res.loopbackStatus && res.loopbackStatus.error) {
+            showToast('Server error: ' + res.loopbackStatus.error, 'error');
+          } else {
+            showToast('Settings saved');
+          }
+          // Refresh addresses and port from main after restart
+          try {
+            const cfg2 = await api.getConfig();
+            // Update Access URLs and port display
+            const lan = document.getElementById('serverLan');
+            const port2 = (cfg2.serverInfo?.port || 793);
+            const addrsRaw = Array.isArray(cfg2.serverInfo?.addresses) ? cfg2.serverInfo.addresses : [];
+            const unique = Array.from(new Set(addrsRaw.filter(Boolean)));
+            if (lan) {
+              if (unique.length) {
+                lan.innerHTML = '<div class="addrList">' + unique.map(ip => {
+                  const u = 'http://' + ip + ':' + port2 + '/';
+                  return '<button type="button" class="addrCopy" data-url="'+u+'">'+u+'</button>';
+                }).join('') + '</div>';
+              } else {
+                lan.textContent = '—';
+              }
+            }
+            const loopPortInput = document.getElementById('loopPort');
+            if (loopPortInput) loopPortInput.value = Number.isFinite(Number(cfg2.loopback?.port)) && Number(cfg2.loopback.port) > 0 ? Number(cfg2.loopback.port) : 793;
+          } catch {}
+        }
         else { st.textContent = 'Error'; st.classList.add('error'); showToast('Save failed','error'); }
       } catch (err) {
         st.textContent = 'Error';
@@ -496,6 +581,24 @@
         showToast('Save error','error');
       }
       setTimeout(() => { st.textContent = ''; st.classList.remove('error'); }, 2600);
+    });
+
+    // Copy-to-clipboard for address buttons
+    document.addEventListener('click', async (e) => {
+      const t = e.target;
+      if (t && t.classList && t.classList.contains('addrCopy') && t.dataset && t.dataset.url) {
+        try {
+          await navigator.clipboard.writeText(t.dataset.url);
+          showToast('Copied: ' + t.dataset.url);
+        } catch (err) {
+          // Fallback: select text via temporary input
+          const tmp = document.createElement('input');
+          tmp.style.position = 'fixed'; tmp.style.opacity = '0'; tmp.value = t.dataset.url;
+          document.body.appendChild(tmp); tmp.select();
+          try { document.execCommand('copy'); showToast('Copied'); } catch {}
+          document.body.removeChild(tmp);
+        }
+      }
     });
 
     function updateReloadInputs() {
@@ -725,6 +828,15 @@
   document.getElementById('twStart').addEventListener('input', () => { updatePreview(); updateRule(); });
   const _twDurEl = document.getElementById('twDuration');
   if (_twDurEl) _twDurEl.addEventListener('change', () => { updatePreview(); updateRule(); });
+
+    // Loopback UI
+    function updateLoopInputs(){
+      const on = document.getElementById('loopEnabled').checked;
+      const wrap = document.getElementById('loopFields');
+      if (wrap) wrap.dataset.open = on ? 'true' : 'false';
+    }
+    const loopToggle = document.getElementById('loopEnabled');
+    if (loopToggle) loopToggle.addEventListener('change', updateLoopInputs);
 
     // Link tab timeout to navigate-back; 0 disables navigate back
     function updateNavBackInputs() {

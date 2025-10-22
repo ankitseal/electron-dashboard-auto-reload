@@ -782,5 +782,6 @@ contextBridge.exposeInMainWorld('AutoReload', {
 
 // Minimal app control API for non-privileged pages (e.g., missing-settings screen)
 contextBridge.exposeInMainWorld('App', {
-  openSettings: () => ipcRenderer.send('open-settings')
+  openSettings: () => ipcRenderer.send('open-settings'),
+  getConfig: () => ipcRenderer.invoke('get-config')
 });

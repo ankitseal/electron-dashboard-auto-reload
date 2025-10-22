@@ -26,6 +26,20 @@ Config keys:
 - `navigateBackEnabled` — Return to the configured URL if the page navigates away.
 - `tabTimeoutSec` — Auto-close child tabs after this many seconds. `0` disables and turns off `navigateBackEnabled`.
 
+Loopback navigation (optional):
+
+- `cookies` — Optional array of cookie definitions to seed auth when opening dashboards. Each item: `{ name, value, domain, path, secure, httpOnly }`.
+- `loopback` — Settings for a tiny HTTP endpoint to navigate the existing window with cookies in place:
+	- `enabled` — `true` to start the server.
+	- `host` — Defaults to `0.0.0.0` (binds on all interfaces). Use `127.0.0.1` to restrict to local-only.
+	- `port` — Defaults to `793`.
+	- `minimizeToTray` — If `true`, minimizes the app window to the system tray while the server runs.
+
+Backwards compatibility:
+
+- If `cookies` is present with items, it’s used as the source of truth for auth.
+- Else if legacy `session` exists, a single `SESSION` cookie is synthesized at runtime for the destination hostname (leading `.` domain, path `/`, `secure` only for HTTPS, `httpOnly: true`).
+
 Validation rule:
 - When Rolling Window and Auto Refresh are both enabled, `reloadAfterSec` must be less than the rolling window duration. The Settings UI prevents saving otherwise; the app also enforces this on save.
 
@@ -55,6 +69,29 @@ npm start
 Keyboard shortcut: Ctrl+/ → Open Settings.
 
 Note on icons (dev vs packaged): in dev, Windows taskbar shows the default Electron icon; your custom icon appears after packaging.
+
+## Local loopback /open endpoint
+
+Purpose: allow another local process to ask the running app to open a URL in the existing window, with authentication cookies pre-seeded so dashboards under the same cookie domain open without prompting.
+
+How to enable:
+
+- In `config.json`, set:
+	- `loopback.enabled: true` (defaults to false)
+	- optionally adjust `host` (default `0.0.0.0`) and `port` (default `793`). Use `127.0.0.1` to restrict to local-only.
+- Optionally add `cookies` array to persist multiple auth cookies. If omitted, legacy `session` is used to synthesize a single `SESSION` cookie.
+
+How to call it (verbally described):
+
+- Send an HTTP GET request to `http://127.0.0.1:<port>/open?url=<your-https-or-http-url>` (replace `<port>`; default 793). If the server binds to `0.0.0.0`, you can also reach it via `http://<lan-ip>:<port>/`.
+- On success, the app responds with `{ ok: true, loaded: <url> }` and navigates the existing window.
+- On error (e.g., invalid protocol), a JSON `{ ok: false, error: "..." }` is returned with an appropriate status.
+
+Security notes:
+
+- When binding to `0.0.0.0`, the endpoint is accessible from your LAN. Ensure your network and firewall policies are appropriate.
+- The app never returns or logs raw cookie/token values.
+- Cookies are only seeded for the destination origin being opened, and `secure` cookies are set only for HTTPS URLs.
 
 ## Settings behavior
 
@@ -137,7 +174,16 @@ Troubleshooting WiX:
 - The app loads defaults from the bundled `config.json`, then applies overrides from the user data path.
 - Saving in Settings writes to: `%APPDATA%/<App Name>/config.json` (e.g., `%APPDATA%/ankitseal-dashboard-auto-reload/config.json`).
 - Credentials are encrypted and saved as `userEnc`; plaintext `user` is not persisted.
+- The app may snapshot useful auth cookies after navigation (names matching `SESSION`, `sid`, `sso`, `jwt`, `auth` prefixes) into `cookies` for future runs, and keeps the legacy `session` in sync with the first such cookie for backwards compatibility.
 
 ## Login & CAPTCHA
 
 When redirected to SSO, the app attempts to fill email/password and proceeds after common CAPTCHA challenges (e.g., Turnstile, reCAPTCHA). Manual interaction may still be required depending on the provider.
+
+## Developer test plan (manual)
+
+- Launch the app and authenticate once on the primary dashboard.
+- Trigger a local call to `/open` with a different path on the same origin; confirm no login prompt appears.
+- Trigger `/open` with an invalid protocol (e.g., `file:`); confirm a safe error JSON.
+- Verify auto-reload and existing hotkeys still behave as before.
+- Exit the app and confirm the loopback server has closed (port no longer listening).

@@ -1,13 +1,14 @@
 // Main process for Electron auto-reload app
 // Mirrors Python behavior: set SESSION cookie before navigation, inject keep-alive, periodic reload
 
-const { app, BrowserWindow, session, ipcMain, Menu } = require('electron');
+const { app, BrowserWindow, session, ipcMain, Menu, Tray, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const urlLib = require('url');
 const crypto = require('crypto');
 const { URL } = urlLib;
 const dgram = require('dgram'); // For lightweight NTP query
+const os = require('os');
 
 // --- Lightweight NTP time (used for TOTP) ----------------------------------
 // We keep an offset (ntpTime - systemTime). If NTP fails, offset stays 0 and we
@@ -316,6 +317,25 @@ function loadConfig() {
   const proxyEnabledRaw = (cfg.proxyEnabled === undefined) ? DEFAULTS.proxyEnabled : !!cfg.proxyEnabled;
   const proxyEnabled = proxyEnabledRaw && (proxyHost && proxyPort > 0);
 
+  // New: cookies[] and loopback settings (backwards compatible)
+  const cookiesArr = Array.isArray(cfg.cookies)
+    ? cfg.cookies.map((c) => ({
+        name: String(c?.name || '').trim(),
+        value: String(c?.value || ''),
+        domain: (c?.domain ? String(c.domain) : ''),
+        path: (c?.path ? String(c.path) : '/'),
+        secure: !!c?.secure,
+        httpOnly: c?.httpOnly === undefined ? true : !!c.httpOnly
+      })).filter((c) => c.name && c.value)
+    : [];
+  const loopback = {
+    enabled: !!(cfg.loopback && cfg.loopback.enabled),
+    host: (cfg.loopback && typeof cfg.loopback.host === 'string') ? cfg.loopback.host : '0.0.0.0',
+    port: Number.isFinite(Number(cfg.loopback?.port)) ? Number(cfg.loopback.port) : 793,
+    apiKey: (cfg.loopback && typeof cfg.loopback.apiKey === 'string') ? cfg.loopback.apiKey : 'change-me',
+    minimizeToTray: !!(cfg.loopback && cfg.loopback.minimizeToTray)
+  };
+
   return {
   hasUrl,
   rawUrl,
@@ -340,7 +360,10 @@ function loadConfig() {
   configPath: usedCfgPath,
   // 2FA persisted state: enabled flag and encrypted secret (if present)
   twoFAEnabled: !!cfg.twoFAEnabled,
-  twoFAEnc: cfg.twoFAEnc
+  twoFAEnc: cfg.twoFAEnc,
+  // New
+  cookies: cookiesArr,
+  loopback
   };
 }
 
@@ -542,8 +565,79 @@ async function bootstrap() {
 
   win.once('ready-to-show', () => win.show());
 
+  // --- Loopback server integration (accept /open navigation requests) ---
+  let loopbackHandle = null;
+  let tray = null;
+  function buildCookiesForUrl(targetUrl) {
+    // Prefer config.cookies if provided; else synthesize from legacy session
+    const out = [];
+    if (Array.isArray(cfg.cookies) && cfg.cookies.length > 0) {
+      for (const c of cfg.cookies) {
+        if (!c || !c.name) continue;
+        out.push({
+          name: String(c.name),
+          value: String(c.value || ''),
+          domain: c.domain ? String(c.domain) : '',
+          path: c.path ? String(c.path) : '/',
+          secure: !!c.secure,
+          httpOnly: (c.httpOnly === undefined) ? true : !!c.httpOnly
+        });
+      }
+    } else if (cfg.sessionVal) {
+      try {
+        const u = new urlLib.URL(targetUrl);
+        const host = u.hostname;
+        const isHttps = (u.protocol || '').toLowerCase() === 'https:';
+        out.push({
+          name: 'SESSION',
+          value: String(cfg.sessionVal),
+          domain: '.' + host,
+          path: '/',
+          secure: isHttps,
+          httpOnly: true
+        });
+      } catch {}
+    }
+    return out;
+  }
+
+  async function setCookiesForUrl(electronSession, targetUrl, cookieDefs) {
+    if (!Array.isArray(cookieDefs) || cookieDefs.length === 0) return;
+    let origin; let isHttps = false; let hostname = '';
+    try {
+      const u = new urlLib.URL(targetUrl);
+      origin = u.origin; isHttps = u.protocol.toLowerCase() === 'https:'; hostname = u.hostname;
+    } catch { return; }
+    for (const c of cookieDefs) {
+      if (!c || !c.name) continue;
+      const base = {
+        url: origin,
+        name: String(c.name),
+        value: String(c.value || ''),
+        path: c.path ? String(c.path) : '/',
+        secure: !!(c.secure && isHttps),
+        httpOnly: (c.httpOnly === undefined) ? true : !!c.httpOnly,
+        sameSite: 'lax'
+      };
+      const scope = {};
+      if (c.domain && typeof c.domain === 'string' && c.domain.trim()) {
+        scope.domain = c.domain.trim();
+      } else {
+        scope.domain = '.' + hostname;
+      }
+      try { await electronSession.cookies.set({ ...base, ...scope }); } catch {}
+    }
+  }
+
+  async function ensureCookiesThenNavigate(targetUrl) {
+    const list = buildCookiesForUrl(targetUrl);
+    try { await setCookiesForUrl(sess, targetUrl, list); } catch {}
+    try { await win.loadURL(targetUrl); } catch {}
+  }
+
   // Provide config to preload/renderer
-  ipcMain.handle('get-config', () => ({
+  function getUiConfig() {
+    return ({
     // Raw config for settings UI
   url: cfg.hasUrl ? cfg.targetUrl : '',
     session: cfg.sessionVal,
@@ -562,12 +656,37 @@ async function bootstrap() {
   proxyEnabled: cfg.proxyEnabled,
   autoReloadEnabled: cfg.autoReloadEnabled,
   navigateBackEnabled: cfg.navigateBackEnabled,
-  tabTimeoutSec: cfg.tabTimeoutSec
-  }));
+  tabTimeoutSec: cfg.tabTimeoutSec,
+  // Loopback summary for Settings UI (do not expose secrets)
+  loopback: { enabled: !!cfg.loopback?.enabled, host: cfg.loopback?.host || '0.0.0.0', port: cfg.loopback?.port || 793, minimizeToTray: !!cfg.loopback?.minimizeToTray },
+  serverInfo: (() => {
+    try {
+      const nics = os.networkInterfaces();
+      const ipv4s = [];
+      for (const name of Object.keys(nics)) {
+        for (const rec of nics[name] || []) {
+          if (rec && rec.family === 'IPv4' && !rec.internal) { ipv4s.push(rec.address); }
+        }
+      }
+      const host = cfg.loopback?.host || '0.0.0.0';
+      const port = cfg.loopback?.port || 793;
+      const addresses = (host === '0.0.0.0' || host === '::')
+        ? ['127.0.0.1', ...ipv4s]
+        : [host];
+      const lanIp = ipv4s[0] || '';
+      const listening = !!(global.__loopbackHandle && typeof global.__loopbackHandle.close === 'function');
+      return { lanIp, host, port, addresses, listening };
+    } catch { return { lanIp: '', host: cfg.loopback?.host || '0.0.0.0', port: cfg.loopback?.port || 793, addresses: [], listening: !!(global.__loopbackHandle && typeof global.__loopbackHandle.close === 'function') }; }
+  })()
+  });
+  }
+
+  ipcMain.handle('get-config', () => getUiConfig());
 
   // 2FA IPC: manage enabled flag (persisted) and secret (memory-only)
-  ipcMain.handle('get-2fa-state', () => ({ enabled: twoFAEnabled, hasSecret: !!twoFASecret }));
-  ipcMain.handle('set-2fa-enabled', async (_e, enabled) => {
+  const get2FAState = () => ({ enabled: twoFAEnabled, hasSecret: !!twoFASecret });
+  ipcMain.handle('get-2fa-state', () => get2FAState());
+  const set2FAEnabledFn = async (enabled) => {
     twoFAEnabled = !!enabled;
     // Write only the flag into persisted config file
     try {
@@ -579,8 +698,9 @@ async function bootstrap() {
       fs.writeFileSync(targetPath, JSON.stringify(fileCfg, null, 2));
     } catch {}
     return { ok: true };
-  });
-  ipcMain.handle('set-2fa-secret', async (_e, secretRaw) => {
+  };
+  ipcMain.handle('set-2fa-enabled', async (_e, enabled) => set2FAEnabledFn(enabled));
+  const set2FASecretFn = async (secretRaw) => {
     twoFASecret = extractBase32Secret(secretRaw || '');
     // Persist encrypted secret alongside other settings
     try {
@@ -603,18 +723,20 @@ async function bootstrap() {
       fs.writeFileSync(targetPath, JSON.stringify(fileCfg, null, 2));
     } catch {}
     return { ok: true };
-  });
-  ipcMain.handle('get-totp-code', async () => {
+  };
+  ipcMain.handle('set-2fa-secret', async (_e, secretRaw) => set2FASecretFn(secretRaw));
+  const getTotpCodeFn = async () => {
     if (!twoFAEnabled || !twoFASecret) return '';
     try { return generateTOTP(twoFASecret); } catch { return ''; }
-  });
+  };
+  ipcMain.handle('get-totp-code', async () => getTotpCodeFn());
   // Optional: expose NTP sync status (not used yet by UI)
   ipcMain.handle('get-ntp-status', () => ({
     offsetMs: ntpOffsetMs,
     lastSync: lastNtpSync,
     usingSystemTime: useSystemTimePreference
   }));
-  ipcMain.handle('set-ntp-preference', async (_event, payload) => {
+  const setNtpPreferenceFn = async (payload) => {
     try {
       const server = payload && Object.prototype.hasOwnProperty.call(payload, 'server') ? payload.server : cfg.ntpServer;
       const useLocal = payload && Object.prototype.hasOwnProperty.call(payload, 'useSystemTime') ? !!payload.useSystemTime : cfg.useSystemTime;
@@ -630,8 +752,9 @@ async function bootstrap() {
     } catch (err) {
       return { ok: false, error: String(err && err.message ? err.message : err) };
     }
-  });
-  ipcMain.handle('set-proxy-preference', async (_event, payload) => {
+  };
+  ipcMain.handle('set-ntp-preference', async (_event, payload) => setNtpPreferenceFn(payload));
+  const setProxyPreferenceFn = async (payload) => {
     try {
       const hostRaw = (payload && typeof payload.host === 'string') ? payload.host : (cfg.proxyHost || '');
       const parsedHost = splitProxyHost(hostRaw);
@@ -652,8 +775,9 @@ async function bootstrap() {
     } catch (err) {
       return { ok: false, error: String(err && err.message ? err.message : err) };
     }
-  });
-  ipcMain.handle('remove-2fa-secret', async () => {
+  };
+  ipcMain.handle('set-proxy-preference', async (_event, payload) => setProxyPreferenceFn(payload));
+  const remove2FASecretFn = async () => {
     twoFASecret = '';
     try {
       let fileCfg = {};
@@ -664,13 +788,14 @@ async function bootstrap() {
       fs.writeFileSync(targetPath, JSON.stringify(fileCfg, null, 2));
     } catch {}
     return { ok: true };
-  });
+  };
+  ipcMain.handle('remove-2fa-secret', async () => remove2FASecretFn());
 
   // App version for Settings UI
   ipcMain.handle('get-version', () => ({ version: app.getVersion() }));
 
   // Persist config updates and apply them
-  ipcMain.handle('save-config', async (_evt, newCfg) => {
+  const saveConfigCore = async (newCfg) => {
     try {
       if (!newCfg || typeof newCfg !== 'object') throw new Error('Invalid config');
 
@@ -751,8 +876,14 @@ async function bootstrap() {
         proxyHost: nextProxyHost,
         proxyPort: nextProxyPort,
         proxyUseHttps: nextProxyUseHttps,
-        proxyEnabled: nextProxyEnabled,
-        twoFAEnabled: twoFAEnabled
+    proxyEnabled: nextProxyEnabled,
+    twoFAEnabled: twoFAEnabled,
+    loopback: {
+      enabled: !!(newCfg.loopback && Object.prototype.hasOwnProperty.call(newCfg.loopback,'enabled') ? newCfg.loopback.enabled : (cfg.loopback?.enabled || false)),
+      host: (newCfg.loopback && typeof newCfg.loopback.host === 'string') ? newCfg.loopback.host : (cfg.loopback?.host || '0.0.0.0'),
+      port: Number.isFinite(Number(newCfg.loopback?.port)) ? Number(newCfg.loopback.port) : (cfg.loopback?.port || 793),
+      minimizeToTray: !!(newCfg.loopback && Object.prototype.hasOwnProperty.call(newCfg.loopback,'minimizeToTray') ? newCfg.loopback.minimizeToTray : (cfg.loopback?.minimizeToTray || false))
+    }
       };
 
   // Write file (ensure folder exists)
@@ -805,8 +936,8 @@ async function bootstrap() {
         delete toWrite.twoFAEnc;
       }
 
-      fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-      fs.writeFileSync(targetPath, JSON.stringify(toWrite, null, 2));
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.writeFileSync(targetPath, JSON.stringify(toWrite, null, 2));
 
       // Apply in-memory cfg (mutate properties)
   cfg.hasUrl = !!(merged.url && String(merged.url).trim());
@@ -827,6 +958,7 @@ async function bootstrap() {
   cfg.proxyPort = merged.proxyPort;
   cfg.proxyUseHttps = merged.proxyUseHttps;
   cfg.proxyEnabled = merged.proxyEnabled;
+  cfg.loopback = merged.loopback;
   if (cfg.autoReloadEnabled && cfg.reloadAfterSec > 0) { try { lastAutoReloadStart = Date.now(); } catch {} }
 
   await configureProxy(cfg.proxyHost, cfg.proxyPort, cfg.proxyUseHttps, cfg.proxyEnabled);
@@ -844,11 +976,99 @@ async function bootstrap() {
       console.log('[electron-auto-reload] Applying new config, navigating to:', dest);
       win.loadURL(dest).catch(() => {});
 
-  return { ok: true, path: targetPath };
+      // Restart or stop/start loopback server if settings changed
+      let loopbackStatus = { changed: false, enabled: !!merged.loopback?.enabled, host: merged.loopback?.host || '0.0.0.0', port: merged.loopback?.port || 793, listening: !!(global.__loopbackHandle && typeof global.__loopbackHandle.close === 'function'), error: null };
+      try {
+        const prev = (cfg.loopback || {});
+        const next = merged.loopback || {};
+        const prevEnabled = !!prev.enabled;
+        const nextEnabled = !!next.enabled;
+        const changed = (prevEnabled !== nextEnabled) ||
+                        ((prev.host || '') !== (next.host || '')) ||
+                        (Number(prev.port) !== Number(next.port)) ||
+                        (!!prev.minimizeToTray !== !!next.minimizeToTray);
+        loopbackStatus.changed = changed;
+        if (changed) {
+          // Close existing server if any
+          if (global.__loopbackHandle && typeof global.__loopbackHandle.close === 'function') {
+            try { await global.__loopbackHandle.close(); } catch {}
+            try { global.__loopbackHandle = null; } catch {}
+          }
+          // Tray toggle
+          if (!next.minimizeToTray && tray) {
+            try { tray.destroy(); } catch {}
+            tray = null;
+          }
+          if (nextEnabled) {
+            const { startLocalServer } = require('./local-server');
+            try {
+              loopbackHandle = await startLocalServer({
+                host: next.host || '0.0.0.0',
+                port: Number.isFinite(Number(next.port)) ? Number(next.port) : 793,
+                onOpen: async (targetUrl) => { await ensureCookiesThenNavigate(targetUrl); },
+                onGetConfig: () => getUiConfig(),
+                onSaveConfig: (payload) => saveConfigCore(payload),
+                onGetVersion: () => ({ version: app.getVersion() }),
+                onSetNtpPreference: (payload) => setNtpPreferenceFn(payload),
+                onSetProxyPreference: (payload) => setProxyPreferenceFn(payload),
+                onGet2FAState: () => get2FAState(),
+                onSet2FAEnabled: (enabled) => set2FAEnabledFn(enabled),
+                onSet2FASecret: (secret) => set2FASecretFn(secret),
+                onRemove2FASecret: () => remove2FASecretFn(),
+                onGetTotpCode: () => getTotpCodeFn()
+              });
+              try { global.__loopbackHandle = loopbackHandle; } catch {}
+              loopbackStatus.listening = true;
+            } catch (err) {
+              loopbackStatus.error = String(err && err.message ? err.message : err);
+              loopbackStatus.listening = false;
+              // Attempt to restore previous server if it was enabled
+              if (prevEnabled) {
+                try {
+                  loopbackHandle = await startLocalServer({
+                    host: prev.host || '0.0.0.0',
+                    port: Number.isFinite(Number(prev.port)) ? Number(prev.port) : 793,
+                    onOpen: async (targetUrl) => { await ensureCookiesThenNavigate(targetUrl); },
+                    onGetConfig: () => getUiConfig(),
+                    onSaveConfig: (payload) => saveConfigCore(payload),
+                    onGetVersion: () => ({ version: app.getVersion() }),
+                    onSetNtpPreference: (payload) => setNtpPreferenceFn(payload),
+                    onSetProxyPreference: (payload) => setProxyPreferenceFn(payload),
+                    onGet2FAState: () => get2FAState(),
+                    onSet2FAEnabled: (enabled) => set2FAEnabledFn(enabled),
+                    onSet2FASecret: (secret) => set2FASecretFn(secret),
+                    onRemove2FASecret: () => remove2FASecretFn(),
+                    onGetTotpCode: () => getTotpCodeFn()
+                  });
+                  try { global.__loopbackHandle = loopbackHandle; } catch {}
+                } catch {}
+              }
+            }
+            if (next.minimizeToTray && !tray) {
+              try {
+                const nImg = nativeImage.createFromPath(appIcon);
+                tray = new Tray(nImg);
+                tray.setToolTip('Dashboard Auto Reload');
+                const contextMenu = Menu.buildFromTemplate([
+                  { label: 'Show', click: () => { try { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } catch {} } },
+                  { type: 'separator' },
+                  { label: 'Quit', click: () => { try { if (tray) { tray.destroy(); tray = null; } } catch {}; app.quit(); } }
+                ]);
+                tray.setContextMenu(contextMenu);
+                tray.on('click', () => { try { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } catch {} });
+                try { global.__tray = tray; } catch {}
+              } catch {}
+            }
+          }
+        }
+      } catch (e) { loopbackStatus.error = loopbackStatus.error || String(e && e.message ? e.message : e); }
+
+  return { ok: true, path: targetPath, loopbackStatus };
     } catch (e) {
       return { ok: false, error: String(e && e.message || e) };
     }
-  });
+  };
+  ipcMain.handle('save-config', async (_evt, newCfg) => saveConfigCore(newCfg));
 
   // Child window management for links intended to open in new tabs
   const childWindows = new Set();
@@ -1322,6 +1542,46 @@ async function bootstrap() {
   ]);
   Menu.setApplicationMenu(menu);
 
+  // Start local loopback server if enabled, or if config is missing (for remote setup)
+  try {
+    if ((cfg.loopback && cfg.loopback.enabled) || !cfg.hasUrl) {
+      const { startLocalServer } = require('./local-server');
+      loopbackHandle = await startLocalServer({
+        host: (cfg.loopback && cfg.loopback.host) ? cfg.loopback.host : '0.0.0.0',
+        port: Number.isFinite(Number(cfg.loopback?.port)) ? Number(cfg.loopback.port) : 793,
+        onOpen: async (targetUrl) => { await ensureCookiesThenNavigate(targetUrl); },
+        onGetConfig: () => getUiConfig(),
+        onSaveConfig: (payload) => saveConfigCore(payload),
+        onGetVersion: () => ({ version: app.getVersion() }),
+        onSetNtpPreference: (payload) => setNtpPreferenceFn(payload),
+        onSetProxyPreference: (payload) => setProxyPreferenceFn(payload),
+        onGet2FAState: () => get2FAState(),
+        onSet2FAEnabled: (enabled) => set2FAEnabledFn(enabled),
+        onSet2FASecret: (secret) => set2FASecretFn(secret),
+        onRemove2FASecret: () => remove2FASecretFn(),
+        onGetTotpCode: () => getTotpCodeFn()
+      });
+      try { global.__loopbackHandle = loopbackHandle; } catch {}
+      if (cfg.loopback && cfg.loopback.minimizeToTray && !tray) {
+        try {
+          const nImg = nativeImage.createFromPath(appIcon);
+          tray = new Tray(nImg);
+          tray.setToolTip('Dashboard Auto Reload');
+          const contextMenu = Menu.buildFromTemplate([
+            { label: 'Show', click: () => { try { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } catch {} } },
+            { type: 'separator' },
+            { label: 'Quit', click: () => { try { if (tray) { tray.destroy(); tray = null; } } catch {}; app.quit(); } }
+          ]);
+          tray.setContextMenu(contextMenu);
+          tray.on('click', () => { try { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } catch {} });
+          try { global.__tray = tray; } catch {}
+        } catch {}
+      }
+    }
+  } catch (e) {
+    console.error('[loopback] failed to start:', e && e.message ? e.message : e);
+  }
+
   // Suppress noisy DevTools Autofill protocol errors on Chromium builds without the domain
   const suppressedDevtoolsMessages = [
     'Request Autofill.enable failed',
@@ -1346,10 +1606,9 @@ async function bootstrap() {
       console.log('[electron-auto-reload] Final URL:', initialUrl);
       await win.loadURL(initialUrl);
     } else {
-      console.log('[electron-auto-reload] No URL configured — showing missing-settings screen and opening Settings…');
+      console.log('[electron-auto-reload] No URL configured — showing missing-settings screen.');
       const missingPath = path.join(__dirname, '..', 'renderer', 'missing.html');
       await win.loadFile(missingPath).catch(async () => { await win.loadURL('about:blank'); });
-      setTimeout(() => { try { openSettings(); } catch {} }, 400);
     }
   } catch (e) {
     // Ignore initial redirect aborts
@@ -1357,9 +1616,64 @@ async function bootstrap() {
       throw e;
     }
   }
+
+  // Snapshot useful auth cookies after navigation for future runs
+  async function persistAuthCookiesIfAvailable() {
+    try {
+      const current = win.webContents.getURL();
+      if (!current) return;
+      const u = new urlLib.URL(current);
+      const origin = u.origin;
+      // Only persist for http/https
+      if (!/^https?:$/i.test(u.protocol)) return;
+      const all = await sess.cookies.get({ url: origin });
+      const useful = (all || []).filter((ck) => /^(session|sid|sso|jwt|auth)/i.test(ck.name || ''))
+        .map((ck) => ({
+          name: ck.name,
+          value: ck.value || '',
+          domain: ck.domain || ('.' + u.hostname),
+          path: ck.path || '/',
+          secure: !!ck.secure,
+          httpOnly: !!ck.httpOnly
+        }));
+      if (!useful.length) return;
+      // Update config file: cookies[], and keep legacy session with first entry's value for back-compat
+      let fileCfg = {};
+      try { fileCfg = JSON.parse(fs.readFileSync(cfg.configPath, 'utf-8')); } catch {}
+      fileCfg.cookies = useful;
+      if (!fileCfg.session && useful[0] && useful[0].value) {
+        fileCfg.session = useful[0].value;
+      }
+      const targetPath = path.join(app.getPath('userData'), 'config.json');
+      fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+      fs.writeFileSync(targetPath, JSON.stringify(fileCfg, null, 2));
+      // Update in-memory too (do not log values)
+      cfg.cookies = useful;
+      if (useful[0] && useful[0].value) cfg.sessionVal = useful[0].value;
+    } catch {}
+  }
+
+  win.webContents.on('did-finish-load', persistAuthCookiesIfAvailable);
+  win.webContents.on('did-navigate-in-page', persistAuthCookiesIfAvailable);
+
+  // Minimize/Close to tray while server runs (if enabled)
+  const maybeHideToTray = (event) => {
+    try {
+      if (cfg.loopback && cfg.loopback.enabled && cfg.loopback.minimizeToTray && tray) {
+        if (event && typeof event.preventDefault === 'function') event.preventDefault();
+        win.hide();
+        return true;
+      }
+    } catch {}
+    return false;
+  };
+  win.on('minimize', (e) => { maybeHideToTray(e); });
+  win.on('close', (e) => { if (maybeHideToTray(e)) return; });
 }
 
 app.on('window-all-closed', () => {
+  try { /* Close loopback server */ if (global.__loopbackHandle && typeof global.__loopbackHandle.close === 'function') { global.__loopbackHandle.close().catch(()=>{}); } } catch {}
+  try { if (global.__tray) { global.__tray.destroy(); global.__tray = null; } } catch {}
   app.quit();
 });
 
