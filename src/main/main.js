@@ -10,6 +10,10 @@ const { URL } = urlLib;
 const dgram = require('dgram'); // For lightweight NTP query
 const os = require('os');
 
+// Enable more reliable offscreen rendering on Windows by disabling GPU acceleration
+// before the app is ready. This helps ensure 'paint' events fire for offscreen windows.
+try { app.disableHardwareAcceleration(); } catch {}
+
 // --- Lightweight NTP time (used for TOTP) ----------------------------------
 // We keep an offset (ntpTime - systemTime). If NTP fails, offset stays 0 and we
 // transparently fall back to system time (previous behavior).
@@ -317,7 +321,7 @@ function loadConfig() {
   const proxyEnabledRaw = (cfg.proxyEnabled === undefined) ? DEFAULTS.proxyEnabled : !!cfg.proxyEnabled;
   const proxyEnabled = proxyEnabledRaw && (proxyHost && proxyPort > 0);
 
-  // New: cookies[] and loopback settings (backwards compatible)
+  // New: cookies[] and remote setup settings (backwards compatible)
   const cookiesArr = Array.isArray(cfg.cookies)
     ? cfg.cookies.map((c) => ({
         name: String(c?.name || '').trim(),
@@ -328,12 +332,20 @@ function loadConfig() {
         httpOnly: c?.httpOnly === undefined ? true : !!c.httpOnly
       })).filter((c) => c.name && c.value)
     : [];
-  const loopback = {
-    enabled: !!(cfg.loopback && cfg.loopback.enabled),
-    host: (cfg.loopback && typeof cfg.loopback.host === 'string') ? cfg.loopback.host : '0.0.0.0',
-    port: Number.isFinite(Number(cfg.loopback?.port)) ? Number(cfg.loopback.port) : 793,
-    apiKey: (cfg.loopback && typeof cfg.loopback.apiKey === 'string') ? cfg.loopback.apiKey : 'change-me',
-    minimizeToTray: !!(cfg.loopback && cfg.loopback.minimizeToTray)
+  const remoteSetupRaw = cfg.remoteSetup || cfg.remotesetup || cfg.loopback || {};
+  const remoteSetup = {
+    enabled: !!remoteSetupRaw.enabled,
+    host: (typeof remoteSetupRaw.host === 'string') ? remoteSetupRaw.host : '0.0.0.0',
+    port: Number.isFinite(Number(remoteSetupRaw?.port)) ? Number(remoteSetupRaw.port) : 793,
+    apiKey: (typeof remoteSetupRaw.apiKey === 'string') ? remoteSetupRaw.apiKey : 'change-me'
+  };
+
+  // Reverse proxy (offscreen streamer) settings
+  const reverseProxy = {
+    enabled: !!(cfg.reverseProxy && cfg.reverseProxy.enabled),
+    host: (cfg.reverseProxy && typeof cfg.reverseProxy.host === 'string') ? cfg.reverseProxy.host : '0.0.0.0',
+    port: Number.isFinite(Number(cfg.reverseProxy?.port)) ? Number(cfg.reverseProxy.port) : 7993,
+    minimizeToTray: !!(cfg.reverseProxy && cfg.reverseProxy.minimizeToTray)
   };
 
   return {
@@ -363,7 +375,8 @@ function loadConfig() {
   twoFAEnc: cfg.twoFAEnc,
   // New
   cookies: cookiesArr,
-  loopback
+    remoteSetup,
+  reverseProxy
   };
 }
 
@@ -565,8 +578,9 @@ async function bootstrap() {
 
   win.once('ready-to-show', () => win.show());
 
-  // --- Loopback server integration (accept /open navigation requests) ---
-  let loopbackHandle = null;
+  // --- Remote setup server integration (accept /open navigation requests) ---
+  let remoteSetupHandle = null;
+  let reverseProxyHandle = null;
   let tray = null;
   function buildCookiesForUrl(targetUrl) {
     // Prefer config.cookies if provided; else synthesize from legacy session
@@ -657,8 +671,13 @@ async function bootstrap() {
   autoReloadEnabled: cfg.autoReloadEnabled,
   navigateBackEnabled: cfg.navigateBackEnabled,
   tabTimeoutSec: cfg.tabTimeoutSec,
-  // Loopback summary for Settings UI (do not expose secrets)
-  loopback: { enabled: !!cfg.loopback?.enabled, host: cfg.loopback?.host || '0.0.0.0', port: cfg.loopback?.port || 793, minimizeToTray: !!cfg.loopback?.minimizeToTray },
+  // Remote setup summary for Settings UI (do not expose secrets)
+  remoteSetup: (() => {
+    const rs = cfg.remoteSetup || cfg.remotesetup || cfg.loopback || {};
+    return { enabled: !!rs.enabled, host: rs.host || '0.0.0.0', port: rs.port || 793 };
+  })(),
+  // Reverse proxy (offscreen streamer)
+  reverseProxy: { enabled: !!cfg.reverseProxy?.enabled, host: cfg.reverseProxy?.host || '0.0.0.0', port: cfg.reverseProxy?.port || 7993, minimizeToTray: !!cfg.reverseProxy?.minimizeToTray },
   serverInfo: (() => {
     try {
       const nics = os.networkInterfaces();
@@ -668,15 +687,24 @@ async function bootstrap() {
           if (rec && rec.family === 'IPv4' && !rec.internal) { ipv4s.push(rec.address); }
         }
       }
-      const host = cfg.loopback?.host || '0.0.0.0';
-      const port = cfg.loopback?.port || 793;
+      const rs = cfg.remoteSetup || cfg.remotesetup || cfg.loopback || {};
+      const host = rs.host || '0.0.0.0';
+      const port = rs.port || 793;
       const addresses = (host === '0.0.0.0' || host === '::')
         ? ['127.0.0.1', ...ipv4s]
         : [host];
       const lanIp = ipv4s[0] || '';
-      const listening = !!(global.__loopbackHandle && typeof global.__loopbackHandle.close === 'function');
-      return { lanIp, host, port, addresses, listening };
-    } catch { return { lanIp: '', host: cfg.loopback?.host || '0.0.0.0', port: cfg.loopback?.port || 793, addresses: [], listening: !!(global.__loopbackHandle && typeof global.__loopbackHandle.close === 'function') }; }
+      const listening = !!(global.__remoteSetupHandle && typeof global.__remoteSetupHandle.close === 'function');
+      // Reverse proxy advertised addresses
+      const rpHost = cfg.reverseProxy?.host || '0.0.0.0';
+      const rpPort = cfg.reverseProxy?.port || 7993;
+      const rpAddresses = (rpHost === '0.0.0.0' || rpHost === '::') ? ['127.0.0.1', ...ipv4s] : [rpHost];
+      const rpListening = !!(global.__reverseProxyHandle && typeof global.__reverseProxyHandle.close === 'function');
+      return { lanIp, host, port, addresses, listening, reverseProxy: { host: rpHost, port: rpPort, addresses: rpAddresses, listening: rpListening } };
+    } catch {
+      const rs = cfg.remoteSetup || cfg.remotesetup || cfg.loopback || {};
+      return { lanIp: '', host: rs.host || '0.0.0.0', port: rs.port || 793, addresses: [], listening: !!(global.__remoteSetupHandle && typeof global.__remoteSetupHandle.close === 'function') };
+    }
   })()
   });
   }
@@ -700,12 +728,13 @@ async function bootstrap() {
     return { ok: true };
   };
   ipcMain.handle('set-2fa-enabled', async (_e, enabled) => set2FAEnabledFn(enabled));
+
   const set2FASecretFn = async (secretRaw) => {
-    twoFASecret = extractBase32Secret(secretRaw || '');
-    // Persist encrypted secret alongside other settings
     try {
+      twoFASecret = extractBase32Secret(secretRaw);
       let fileCfg = {};
       try { fileCfg = JSON.parse(fs.readFileSync(cfg.configPath, 'utf-8')); } catch {}
+      // Encrypt and persist the secret
       const keyPath = path.join(app.getPath('userData'), 'key.bin');
       let key = null;
       try { key = fs.readFileSync(keyPath); } catch {
@@ -721,8 +750,10 @@ async function bootstrap() {
       const targetPath = path.join(app.getPath('userData'), 'config.json');
       fs.mkdirSync(path.dirname(targetPath), { recursive: true });
       fs.writeFileSync(targetPath, JSON.stringify(fileCfg, null, 2));
-    } catch {}
-    return { ok: true };
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err && err.message ? err.message : err) };
+    }
   };
   ipcMain.handle('set-2fa-secret', async (_e, secretRaw) => set2FASecretFn(secretRaw));
   const getTotpCodeFn = async () => {
@@ -860,6 +891,23 @@ async function bootstrap() {
         nextProxyHost && nextProxyPort > 0
       );
 
+      const incomingRemote = newCfg.remoteSetup ?? newCfg.remotesetup ?? newCfg.loopback ?? {};
+      const currentRemote = cfg.remoteSetup || cfg.remotesetup || cfg.loopback || {};
+      const mergedRemoteSetup = {
+        enabled: Object.prototype.hasOwnProperty.call(incomingRemote, 'enabled')
+          ? !!incomingRemote.enabled
+          : !!currentRemote.enabled,
+        host: (typeof incomingRemote.host === 'string')
+          ? incomingRemote.host
+          : ((typeof currentRemote.host === 'string') ? currentRemote.host : '0.0.0.0'),
+        port: Number.isFinite(Number(incomingRemote.port))
+          ? Number(incomingRemote.port)
+          : (Number.isFinite(Number(currentRemote.port)) ? Number(currentRemote.port) : 793),
+        apiKey: (typeof incomingRemote.apiKey === 'string')
+          ? incomingRemote.apiKey
+          : ((typeof currentRemote.apiKey === 'string') ? currentRemote.apiKey : 'change-me')
+      };
+
   const merged = {
         url: (typeof newCfg.url === 'string') ? newCfg.url : (cfg.hasUrl ? cfg.targetUrl : ''),
         session: newCfg.session || cfg.sessionVal || '',
@@ -878,11 +926,12 @@ async function bootstrap() {
         proxyUseHttps: nextProxyUseHttps,
     proxyEnabled: nextProxyEnabled,
     twoFAEnabled: twoFAEnabled,
-    loopback: {
-      enabled: !!(newCfg.loopback && Object.prototype.hasOwnProperty.call(newCfg.loopback,'enabled') ? newCfg.loopback.enabled : (cfg.loopback?.enabled || false)),
-      host: (newCfg.loopback && typeof newCfg.loopback.host === 'string') ? newCfg.loopback.host : (cfg.loopback?.host || '0.0.0.0'),
-      port: Number.isFinite(Number(newCfg.loopback?.port)) ? Number(newCfg.loopback.port) : (cfg.loopback?.port || 793),
-      minimizeToTray: !!(newCfg.loopback && Object.prototype.hasOwnProperty.call(newCfg.loopback,'minimizeToTray') ? newCfg.loopback.minimizeToTray : (cfg.loopback?.minimizeToTray || false))
+    remoteSetup: mergedRemoteSetup,
+    reverseProxy: {
+      enabled: !!(newCfg.reverseProxy && Object.prototype.hasOwnProperty.call(newCfg.reverseProxy,'enabled') ? newCfg.reverseProxy.enabled : (cfg.reverseProxy?.enabled || false)),
+      host: (newCfg.reverseProxy && typeof newCfg.reverseProxy.host === 'string') ? newCfg.reverseProxy.host : (cfg.reverseProxy?.host || '0.0.0.0'),
+      port: Number.isFinite(Number(newCfg.reverseProxy?.port)) ? Number(newCfg.reverseProxy.port) : (cfg.reverseProxy?.port || 7993),
+      minimizeToTray: !!(newCfg.reverseProxy && Object.prototype.hasOwnProperty.call(newCfg.reverseProxy,'minimizeToTray') ? newCfg.reverseProxy.minimizeToTray : (cfg.reverseProxy?.minimizeToTray || false))
     }
       };
 
@@ -958,7 +1007,25 @@ async function bootstrap() {
   cfg.proxyPort = merged.proxyPort;
   cfg.proxyUseHttps = merged.proxyUseHttps;
   cfg.proxyEnabled = merged.proxyEnabled;
-  cfg.loopback = merged.loopback;
+  // Determine if remote setup / reverse proxy enabled flags toggled (before mutating cfg)
+  const remoteSetupToggledOnOff = (!!(cfg.remoteSetup || cfg.remotesetup || cfg.loopback)?.enabled) !== (!!merged.remoteSetup?.enabled);
+  const reverseProxyToggledOnOff = (!!cfg.reverseProxy?.enabled) !== (!!merged.reverseProxy?.enabled);
+  // Also detect host/port changes that should require a full app restart
+  const remoteSetupHostPortChanged = (
+    (String((cfg.remoteSetup || cfg.remotesetup || cfg.loopback)?.host || '0.0.0.0') !== String(merged.remoteSetup?.host || '0.0.0.0')) ||
+    (Number((cfg.remoteSetup || cfg.remotesetup || cfg.loopback)?.port) !== Number(merged.remoteSetup?.port))
+  );
+  const reverseProxyHostPortChanged = (
+    (String(cfg.reverseProxy?.host || '0.0.0.0') !== String(merged.reverseProxy?.host || '0.0.0.0')) ||
+    (Number(cfg.reverseProxy?.port) !== Number(merged.reverseProxy?.port))
+  );
+  // Detect tray behavior change which now also requires restart
+  const reverseProxyTrayChanged = (!!cfg.reverseProxy?.minimizeToTray) !== (!!merged.reverseProxy?.minimizeToTray);
+
+  cfg.remoteSetup = merged.remoteSetup;
+  delete cfg.loopback;
+  delete cfg.remotesetup;
+  cfg.reverseProxy = merged.reverseProxy;
   if (cfg.autoReloadEnabled && cfg.reloadAfterSec > 0) { try { lastAutoReloadStart = Date.now(); } catch {} }
 
   await configureProxy(cfg.proxyHost, cfg.proxyPort, cfg.proxyUseHttps, cfg.proxyEnabled);
@@ -976,99 +1043,46 @@ async function bootstrap() {
       console.log('[electron-auto-reload] Applying new config, navigating to:', dest);
       win.loadURL(dest).catch(() => {});
 
-      // Restart or stop/start loopback server if settings changed
-      let loopbackStatus = { changed: false, enabled: !!merged.loopback?.enabled, host: merged.loopback?.host || '0.0.0.0', port: merged.loopback?.port || 793, listening: !!(global.__loopbackHandle && typeof global.__loopbackHandle.close === 'function'), error: null };
+      // Restart or stop/start remote setup server if settings changed
+      let remoteSetupStatus = { changed: false, enabled: !!merged.remoteSetup?.enabled, host: merged.remoteSetup?.host || '0.0.0.0', port: merged.remoteSetup?.port || 793, listening: !!(global.__remoteSetupHandle && typeof global.__remoteSetupHandle.close === 'function'), error: null };
       try {
-        const prev = (cfg.loopback || {});
-        const next = merged.loopback || {};
-        const prevEnabled = !!prev.enabled;
-        const nextEnabled = !!next.enabled;
-        const changed = (prevEnabled !== nextEnabled) ||
-                        ((prev.host || '') !== (next.host || '')) ||
-                        (Number(prev.port) !== Number(next.port)) ||
-                        (!!prev.minimizeToTray !== !!next.minimizeToTray);
-        loopbackStatus.changed = changed;
-        if (changed) {
-          // Close existing server if any
-          if (global.__loopbackHandle && typeof global.__loopbackHandle.close === 'function') {
-            try { await global.__loopbackHandle.close(); } catch {}
-            try { global.__loopbackHandle = null; } catch {}
-          }
-          // Tray toggle
-          if (!next.minimizeToTray && tray) {
-            try { tray.destroy(); } catch {}
-            tray = null;
-          }
-          if (nextEnabled) {
-            const { startLocalServer } = require('./local-server');
-            try {
-              loopbackHandle = await startLocalServer({
-                host: next.host || '0.0.0.0',
-                port: Number.isFinite(Number(next.port)) ? Number(next.port) : 793,
-                onOpen: async (targetUrl) => { await ensureCookiesThenNavigate(targetUrl); },
-                onGetConfig: () => getUiConfig(),
-                onSaveConfig: (payload) => saveConfigCore(payload),
-                onGetVersion: () => ({ version: app.getVersion() }),
-                onSetNtpPreference: (payload) => setNtpPreferenceFn(payload),
-                onSetProxyPreference: (payload) => setProxyPreferenceFn(payload),
-                onGet2FAState: () => get2FAState(),
-                onSet2FAEnabled: (enabled) => set2FAEnabledFn(enabled),
-                onSet2FASecret: (secret) => set2FASecretFn(secret),
-                onRemove2FASecret: () => remove2FASecretFn(),
-                onGetTotpCode: () => getTotpCodeFn()
-              });
-              try { global.__loopbackHandle = loopbackHandle; } catch {}
-              loopbackStatus.listening = true;
-            } catch (err) {
-              loopbackStatus.error = String(err && err.message ? err.message : err);
-              loopbackStatus.listening = false;
-              // Attempt to restore previous server if it was enabled
-              if (prevEnabled) {
-                try {
-                  loopbackHandle = await startLocalServer({
-                    host: prev.host || '0.0.0.0',
-                    port: Number.isFinite(Number(prev.port)) ? Number(prev.port) : 793,
-                    onOpen: async (targetUrl) => { await ensureCookiesThenNavigate(targetUrl); },
-                    onGetConfig: () => getUiConfig(),
-                    onSaveConfig: (payload) => saveConfigCore(payload),
-                    onGetVersion: () => ({ version: app.getVersion() }),
-                    onSetNtpPreference: (payload) => setNtpPreferenceFn(payload),
-                    onSetProxyPreference: (payload) => setProxyPreferenceFn(payload),
-                    onGet2FAState: () => get2FAState(),
-                    onSet2FAEnabled: (enabled) => set2FAEnabledFn(enabled),
-                    onSet2FASecret: (secret) => set2FASecretFn(secret),
-                    onRemove2FASecret: () => remove2FASecretFn(),
-                    onGetTotpCode: () => getTotpCodeFn()
-                  });
-                  try { global.__loopbackHandle = loopbackHandle; } catch {}
-                } catch {}
-              }
-            }
-            if (next.minimizeToTray && !tray) {
-              try {
-                const nImg = nativeImage.createFromPath(appIcon);
-                tray = new Tray(nImg);
-                tray.setToolTip('Dashboard Auto Reload');
-                const contextMenu = Menu.buildFromTemplate([
-                  { label: 'Show', click: () => { try { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } catch {} } },
-                  { type: 'separator' },
-                  { label: 'Quit', click: () => { try { if (tray) { tray.destroy(); tray = null; } } catch {}; app.quit(); } }
-                ]);
-                tray.setContextMenu(contextMenu);
-                tray.on('click', () => { try { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } catch {} });
-                try { global.__tray = tray; } catch {}
-              } catch {}
-            }
-          }
+        if (remoteSetupToggledOnOff || remoteSetupHostPortChanged) {
+          // Defer applying by requesting a full app restart
+          remoteSetupStatus.changed = true;
+        } else {
+          // No restart needed and no live-change to apply for remote setup
+          remoteSetupStatus.changed = false;
         }
-      } catch (e) { loopbackStatus.error = loopbackStatus.error || String(e && e.message ? e.message : e); }
+      } catch (e) { remoteSetupStatus.error = remoteSetupStatus.error || String(e && e.message ? e.message : e); }
 
-  return { ok: true, path: targetPath, loopbackStatus };
+      // Reverse proxy server restart/start/stop
+  let reverseProxyStatus = { changed: false, enabled: !!merged.reverseProxy?.enabled, host: merged.reverseProxy?.host || '0.0.0.0', port: merged.reverseProxy?.port || 7993, minimizeToTray: !!merged.reverseProxy?.minimizeToTray, listening: !!(global.__reverseProxyHandle && typeof global.__reverseProxyHandle.close === 'function'), error: null };
+      try {
+        if (reverseProxyToggledOnOff || reverseProxyHostPortChanged || reverseProxyTrayChanged) {
+          // Defer applying by requesting a full app restart (now includes tray toggle)
+          reverseProxyStatus.changed = true;
+        } else {
+          // No restart-worthy change
+          reverseProxyStatus.changed = false;
+        }
+      } catch (e) { reverseProxyStatus.error = reverseProxyStatus.error || String(e && e.message ? e.message : e); }
+
+  return { ok: true, path: targetPath, remoteSetupStatus, reverseProxyStatus, restartRequired: (remoteSetupToggledOnOff || reverseProxyToggledOnOff || remoteSetupHostPortChanged || reverseProxyHostPortChanged || reverseProxyTrayChanged) };
     } catch (e) {
       return { ok: false, error: String(e && e.message || e) };
     }
   };
   ipcMain.handle('save-config', async (_evt, newCfg) => saveConfigCore(newCfg));
+  // Allow renderer to request a full app restart (used when server toggles change)
+  ipcMain.handle('restart-app', async () => {
+    try {
+      app.relaunch();
+      app.exit(0);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err && err.message ? err.message : err) };
+    }
+  });
 
   // Child window management for links intended to open in new tabs
   const childWindows = new Set();
@@ -1465,7 +1479,7 @@ async function bootstrap() {
     {
       label: 'Settings',
       submenu: [
-  { label: 'Open Settings…', accelerator: 'Ctrl+/', click: () => openSettings() },
+        { label: 'Open Settings…', accelerator: 'Ctrl+/', click: () => openSettings() },
         { type: 'separator' },
         {
           label: 'Auto Refresh',
@@ -1522,7 +1536,7 @@ async function bootstrap() {
               win.webContents.send('auto-reload-stop');
             }
           }
-  }
+        }
       ]
     },
     {
@@ -1542,13 +1556,14 @@ async function bootstrap() {
   ]);
   Menu.setApplicationMenu(menu);
 
-  // Start local loopback server if enabled, or if config is missing (for remote setup)
+  // Start remote setup server if enabled, or if config is missing (for remote setup)
   try {
-    if ((cfg.loopback && cfg.loopback.enabled) || !cfg.hasUrl) {
+    const remoteCfg = cfg.remoteSetup || cfg.remotesetup || cfg.loopback || {};
+    if ((remoteCfg && remoteCfg.enabled) || !cfg.hasUrl) {
       const { startLocalServer } = require('./local-server');
-      loopbackHandle = await startLocalServer({
-        host: (cfg.loopback && cfg.loopback.host) ? cfg.loopback.host : '0.0.0.0',
-        port: Number.isFinite(Number(cfg.loopback?.port)) ? Number(cfg.loopback.port) : 793,
+      remoteSetupHandle = await startLocalServer({
+        host: (remoteCfg && typeof remoteCfg.host === 'string') ? remoteCfg.host : '0.0.0.0',
+        port: Number.isFinite(Number(remoteCfg?.port)) ? Number(remoteCfg.port) : 793,
         onOpen: async (targetUrl) => { await ensureCookiesThenNavigate(targetUrl); },
         onGetConfig: () => getUiConfig(),
         onSaveConfig: (payload) => saveConfigCore(payload),
@@ -1561,14 +1576,37 @@ async function bootstrap() {
         onRemove2FASecret: () => remove2FASecretFn(),
         onGetTotpCode: () => getTotpCodeFn()
       });
-      try { global.__loopbackHandle = loopbackHandle; } catch {}
-      if (cfg.loopback && cfg.loopback.minimizeToTray && !tray) {
+      try {
+        global.__remoteSetupHandle = remoteSetupHandle;
+        // Backward compatibility for any external scripts referencing the old global
+        global.__loopbackHandle = remoteSetupHandle;
+      } catch {}
+    }
+  } catch (e) {
+    console.error('[remote-setup] failed to start:', e && e.message ? e.message : e);
+  }
+
+  // Start reverse proxy (offscreen streamer) if enabled
+  try {
+    if (cfg.reverseProxy && cfg.reverseProxy.enabled) {
+      const { startReverseProxyServer } = require('./proxy-server');
+      reverseProxyHandle = await startReverseProxyServer({
+        host: cfg.reverseProxy.host || '0.0.0.0',
+        port: Number.isFinite(Number(cfg.reverseProxy.port)) ? Number(cfg.reverseProxy.port) : 7993,
+        partition: partitionName,
+        getConfig: () => getUiConfig(),
+        userDataPath: (() => { try { return app.getPath('userData'); } catch { return null; } })(),
+        preloadPath: path.join(__dirname, '..', 'preload', 'preload.js')
+      });
+      try { global.__reverseProxyHandle = reverseProxyHandle; } catch {}
+      if (cfg.reverseProxy.minimizeToTray && !tray) {
         try {
           const nImg = nativeImage.createFromPath(appIcon);
           tray = new Tray(nImg);
           tray.setToolTip('Dashboard Auto Reload');
           const contextMenu = Menu.buildFromTemplate([
             { label: 'Show', click: () => { try { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } catch {} } },
+            { label: 'Settings…', click: () => { try { openSettings(); } catch {} } },
             { type: 'separator' },
             { label: 'Quit', click: () => { try { if (tray) { tray.destroy(); tray = null; } } catch {}; app.quit(); } }
           ]);
@@ -1579,7 +1617,7 @@ async function bootstrap() {
       }
     }
   } catch (e) {
-    console.error('[loopback] failed to start:', e && e.message ? e.message : e);
+    console.error('[reverse-proxy] failed to start:', e && e.message ? e.message : e);
   }
 
   // Suppress noisy DevTools Autofill protocol errors on Chromium builds without the domain
@@ -1659,7 +1697,7 @@ async function bootstrap() {
   // Minimize/Close to tray while server runs (if enabled)
   const maybeHideToTray = (event) => {
     try {
-      if (cfg.loopback && cfg.loopback.enabled && cfg.loopback.minimizeToTray && tray) {
+      if (cfg.reverseProxy && cfg.reverseProxy.enabled && cfg.reverseProxy.minimizeToTray && tray) {
         if (event && typeof event.preventDefault === 'function') event.preventDefault();
         win.hide();
         return true;
@@ -1672,7 +1710,18 @@ async function bootstrap() {
 }
 
 app.on('window-all-closed', () => {
-  try { /* Close loopback server */ if (global.__loopbackHandle && typeof global.__loopbackHandle.close === 'function') { global.__loopbackHandle.close().catch(()=>{}); } } catch {}
+  // Keep running in tray if a tray is present (e.g., reverse proxy minimize-to-tray)
+  try {
+    if (global.__tray) {
+      return; // do not quit; background continues until Quit is chosen from tray
+    }
+  } catch {}
+  try {
+    /* Close remote setup server */
+    const handle = global.__remoteSetupHandle || global.__loopbackHandle;
+    if (handle && typeof handle.close === 'function') { handle.close().catch(() => {}); }
+  } catch {}
+  try { if (global.__reverseProxyHandle && typeof global.__reverseProxyHandle.close === 'function') { global.__reverseProxyHandle.close().catch(()=>{}); } } catch {}
   try { if (global.__tray) { global.__tray.destroy(); global.__tray = null; } } catch {}
   app.quit();
 });

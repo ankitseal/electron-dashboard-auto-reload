@@ -26,14 +26,14 @@ Config keys:
 - `navigateBackEnabled` — Return to the configured URL if the page navigates away.
 - `tabTimeoutSec` — Auto-close child tabs after this many seconds. `0` disables and turns off `navigateBackEnabled`.
 
-Loopback navigation (optional):
+Remote setup navigation (optional):
 
 - `cookies` — Optional array of cookie definitions to seed auth when opening dashboards. Each item: `{ name, value, domain, path, secure, httpOnly }`.
-- `loopback` — Settings for a tiny HTTP endpoint to navigate the existing window with cookies in place:
+- `remoteSetup` — Settings for a tiny HTTP endpoint to navigate the existing window with cookies in place:
 	- `enabled` — `true` to start the server.
 	- `host` — Defaults to `0.0.0.0` (binds on all interfaces). Use `127.0.0.1` to restrict to local-only.
 	- `port` — Defaults to `793`.
-	- `minimizeToTray` — If `true`, minimizes the app window to the system tray while the server runs.
+	- `apiKey` — Shared secret for future authenticated calls (defaults to `change-me`).
 
 Backwards compatibility:
 
@@ -50,6 +50,9 @@ Validation rule:
 - `src/preload/settings-preload.js` — IPC bridge for Settings.
 - `src/renderer/settings/index.html` — Settings UI with tooltips, live URL preview, and validation.
 - `src/renderer/missing.html` — First-run screen when URL is missing.
+- `src/main/local-server.js` — Remote setup relay for `/open` and Settings API.
+- `src/main/proxy-server.js` — Optional reverse proxy streamer (WebSocket-only) serving a landing page and remote viewer.
+- `src/renderer/proxy/index.html` — Landing page and remote viewer UI for the reverse proxy (WebSocket-only stream).
 - `config.json` — Default config included with the app.
 
 ## Run (dev)
@@ -70,14 +73,14 @@ Keyboard shortcut: Ctrl+/ → Open Settings.
 
 Note on icons (dev vs packaged): in dev, Windows taskbar shows the default Electron icon; your custom icon appears after packaging.
 
-## Local loopback /open endpoint
+## Remote setup /open endpoint
 
 Purpose: allow another local process to ask the running app to open a URL in the existing window, with authentication cookies pre-seeded so dashboards under the same cookie domain open without prompting.
 
 How to enable:
 
 - In `config.json`, set:
-	- `loopback.enabled: true` (defaults to false)
+	- `remoteSetup.enabled: true` (defaults to false; legacy `loopback.enabled` is still accepted)
 	- optionally adjust `host` (default `0.0.0.0`) and `port` (default `793`). Use `127.0.0.1` to restrict to local-only.
 - Optionally add `cookies` array to persist multiple auth cookies. If omitted, legacy `session` is used to synthesize a single `SESSION` cookie.
 
@@ -92,6 +95,18 @@ Security notes:
 - When binding to `0.0.0.0`, the endpoint is accessible from your LAN. Ensure your network and firewall policies are appropriate.
 - The app never returns or logs raw cookie/token values.
 - Cookies are only seeded for the destination origin being opened, and `secure` cookies are set only for HTTPS URLs.
+
+## Reverse proxy viewer (optional; WebSocket-only)
+
+If enabled by config, a lightweight reverse proxy streamer runs alongside the app and serves:
+
+- A landing page listing streams and an “Open viewer” link per stream.
+- A remote viewer that renders JPEG frames over WebSocket and forwards mouse/keyboard input.
+
+Notes:
+
+- Transport is WebSocket only (no WebRTC).
+- Authentication cookies are still seeded by the main app before navigation; secrets are not exposed by the viewer.
 
 ## Settings behavior
 
@@ -186,4 +201,4 @@ When redirected to SSO, the app attempts to fill email/password and proceeds aft
 - Trigger a local call to `/open` with a different path on the same origin; confirm no login prompt appears.
 - Trigger `/open` with an invalid protocol (e.g., `file:`); confirm a safe error JSON.
 - Verify auto-reload and existing hotkeys still behave as before.
-- Exit the app and confirm the loopback server has closed (port no longer listening).
+- Exit the app and confirm the remote setup server has closed (port no longer listening).

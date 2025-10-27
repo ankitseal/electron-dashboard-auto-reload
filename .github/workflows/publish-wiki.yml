@@ -1,0 +1,39 @@
+name: Publish Wiki
+
+on:
+  push:
+    paths:
+      - 'docs/wiki/**'
+
+permissions:
+  contents: write
+
+jobs:
+  publish-wiki:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare wiki content
+        run: |
+          set -e
+          mkdir -p wiki-publish
+          cp docs/wiki/*.md wiki-publish/ || true
+          # Ensure Home.md exists
+          if [ -f wiki-publish/README.md ] && [ ! -f wiki-publish/Home.md ]; then
+            mv wiki-publish/README.md wiki-publish/Home.md
+          fi
+
+      - name: Push to GitHub Wiki
+        run: |
+          set -e
+          cd wiki-publish
+          git init
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add .
+          git commit -m "Publish docs/wiki to GitHub Wiki (CI)"
+          git branch -M master
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.wiki.git"
+          git push -u origin master --force

@@ -18,4 +18,6 @@ contextBridge.exposeInMainWorld('Settings', {
     useSystemTime
   }),
   setProxyPreference: (options) => ipcRenderer.invoke('set-proxy-preference', options || {})
+  ,
+  restartApp: () => ipcRenderer.invoke('restart-app')
 });

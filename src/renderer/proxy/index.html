@@ -1,0 +1,296 @@
+<!doctype html>
+<html>
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<title>Reverse Proxy Stream</title>
+	<style>
+		:root{
+			--bg:#f1f5f9;
+			--panel:#ffffff;
+			--panel2:#e4edf5;
+			--text:#0b1725;
+			--muted:#1c2f44;
+			--accent:#115e59;
+			--accent-hover:#0f4c46;
+			--accent-contrast:#ffffff;
+			--line:#b8c5d6;
+			--ok:#166d5f;
+			--warn:#8a5411;
+			--danger:#8b1d2c;
+			--danger-contrast:#ffffff;
+			--page-gradient:radial-gradient(1200px 600px at 10% -10%, #e6f1f3 0%, #d4e3ea 45%, #c1d1df 100%);
+			--glass:rgba(241,245,249,0.88);
+			--hint-bg:rgba(17,94,89,0.12);
+			--hint-border:rgba(17,94,89,0.28);
+			--focus-ring:rgba(17,94,89,0.25);
+			--card-shadow:0 12px 30px rgba(8,18,35,0.12);
+			--card-shadow-hover:0 16px 36px rgba(8,18,35,0.18);
+		}
+		@media (prefers-color-scheme: dark){
+			:root{
+				--bg:#0b1220;
+				--panel:#131c2e;
+				--panel2:#101926;
+				--text:#f8fafc;
+				--muted:#cbd5f5;
+				--accent:#5eead4;
+				--accent-hover:#50d6bf;
+				--accent-contrast:#0b1220;
+				--line:#1f2a3c;
+				--ok:#38d8c2;
+				--warn:#f4ca64;
+				--danger:#fca5a5;
+				--danger-contrast:#0b1220;
+				--page-gradient:radial-gradient(1200px 600px at 10% -10%, #13233b 0%, #0d1a2f 40%, #081223 100%);
+				--glass:rgba(13,22,38,0.82);
+				--hint-bg:rgba(19,28,46,0.75);
+				--hint-border:rgba(94,234,212,0.28);
+				--focus-ring:rgba(94,234,212,0.25);
+				--card-shadow:0 12px 28px rgba(5,12,24,0.45);
+				--card-shadow-hover:0 16px 36px rgba(5,12,24,0.6);
+			}
+		}
+		body{ margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background:var(--page-gradient); color:var(--text); }
+		.container{ max-width:1100px; margin:0 auto; padding:14px 16px; }
+		#bar{ position:sticky; top:0; background:var(--glass); backdrop-filter: blur(18px); border-bottom:1px solid var(--line); z-index:2; }
+		#bar .inner{ display:flex; flex-direction:column; gap:12px; }
+		input[type=text]{ flex:1; min-width:220px; padding:12px 14px; border-radius:10px; border:1px solid var(--line); background:linear-gradient(180deg, var(--panel), var(--panel2)); color:var(--text); outline:none; box-shadow: inset 0 1px 1px rgba(8,18,35,0.08); transition: border-color .18s ease, box-shadow .18s ease; }
+		input[type=text]::placeholder{ color:var(--muted); opacity:0.6; }
+		input[type=text]:focus{ border-color:var(--accent); box-shadow: 0 0 0 3px var(--focus-ring); }
+		button{ background:linear-gradient(180deg, var(--accent), var(--accent-hover)); border:1px solid var(--accent); color:var(--accent-contrast); padding:11px 14px; border-radius:10px; cursor:pointer; font-weight:700; letter-spacing:0.2px; box-shadow:0 6px 16px rgba(17,94,89,0.2); transition: transform .12s ease, box-shadow .18s ease, filter .18s ease; }
+		button:hover{ filter:brightness(1.03); box-shadow:0 10px 20px rgba(17,94,89,0.26); }
+		button:active{ transform:translateY(1px); }
+		button:focus-visible{ outline:none; box-shadow:0 0 0 3px var(--focus-ring); }
+		#list{ padding:16px; display:grid; gap:12px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+		.card{ background:linear-gradient(180deg, var(--panel), var(--panel2)); border:1px solid var(--line); border-radius:12px; padding:14px; box-shadow: var(--card-shadow); transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease; }
+		.card:hover{ border-color:var(--accent); box-shadow: var(--card-shadow-hover); transform: translateY(-2px); }
+		.url{ color:var(--muted); font-size:12px; word-break: break-all; margin-top:8px; }
+		a{ color:var(--accent); text-decoration:none; }
+		a:hover{ text-decoration:underline; color:var(--accent-hover); }
+		/* Viewer */
+		html.view, body.view { height:100%; overflow:hidden; }
+		#stage{ position:fixed; inset:0; background:#000; cursor: crosshair; }
+		#canvas{ position:absolute; inset:0; width:100%; height:100%; image-rendering: auto; }
+		#overlay{ position:absolute; inset:0; }
+		#hint{ position:fixed; left:12px; bottom:12px; color:var(--text); background: var(--hint-bg); padding:6px 10px; border-radius:8px; font-size:12px; border:1px solid var(--hint-border); }
+		/* Removed badge, toast, and diagnostics */
+	</style>
+	<script>
+		// Register SW to avoid stale fetches; optional
+		if ('serviceWorker' in navigator) {
+			window.addEventListener('load', ()=>{
+				try{ navigator.serviceWorker.register('/sw.js'); }catch{}
+			});
+		}
+	</script>
+</head>
+<body>
+	<div id="bar" data-mode="landing">
+		<div class="container inner">
+			<div style="display:flex; align-items:center; gap:12px; width:100%">
+				<div style="flex:1">
+					<div style="font-weight:800; font-size:16px; color:var(--text); letter-spacing:0.2px;">Reverse Proxy Streams</div>
+					<div style="font-size:12px; color:var(--muted);">Mirror your dashboard at native resolution over WebSocket.</div>
+				</div>
+			</div>
+			<div style="display:flex; gap:10px; width:100%">
+				<input id="url" type="text" placeholder="https://your-dashboard..." />
+				<button id="create">Create</button>
+			</div>
+			<div id="dupwarn" style="display:none; color:var(--danger); font-size:12px;">This URL already exists. Opening the existing stream.</div>
+
+		</div>
+	</div>
+	<div id="list" class="container"></div>
+
+	<div id="stage" style="display:none">
+		<canvas id="canvas"></canvas>
+		<div id="overlay" tabindex="0"></div>
+		<div id="hint">Click stage to focus. ESC to exit fullscreen.</div>
+	</div>
+
+	<script>
+	(function(){
+		const path = location.pathname.replace(/\/+$/,'');
+		const isView = /^\/view\//.test(path);
+
+		async function api(path, method='GET', body){
+			const res = await fetch(path, { method, headers: body?{'Content-Type':'application/json'}:undefined, body: body?JSON.stringify(body):undefined});
+			const raw = await res.text();
+			let data = null;
+			if (raw) {
+				try { data = JSON.parse(raw); } catch { data = null; }
+			}
+			if (!res.ok) {
+				const msg = data && (data.error || data.message) ? (data.error || data.message) : ('HTTP '+res.status);
+				const err = new Error(msg);
+				err.status = res.status;
+				throw err;
+			}
+			return data ?? {};
+		}
+
+		if (!isView){
+			// Landing
+			document.getElementById('bar').dataset.mode='landing';
+			const urlEl = document.getElementById('url');
+			const createBtn = document.getElementById('create');
+			const dupEl = document.getElementById('dupwarn');
+			let existingList = [];
+
+			function normalizeForCompare(u){
+				const trimmed = String(u||'').trim();
+				if (!trimmed) return '';
+				const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed);
+				const candidate = hasScheme ? trimmed : ('https://'+trimmed);
+				try{
+					const parsed = new URL(candidate);
+					if (!/^https?:$/i.test(parsed.protocol||'')) return '';
+					parsed.hash = '';
+					return parsed.toString().toLowerCase();
+				}catch{
+					return trimmed.toLowerCase();
+				}
+			}
+			function exists(u){
+				const n = normalizeForCompare(u);
+				if (!n) return false;
+				return existingList.some(it => normalizeForCompare(it.url) === n);
+			}
+
+			document.getElementById('create').addEventListener('click', async ()=>{
+				const u = urlEl.value.trim();
+				if (!u) return;
+				const payload = { url: u, width: Math.floor(window.innerWidth* (window.devicePixelRatio||1)), height: Math.floor(window.innerHeight*(window.devicePixelRatio||1)) };
+				try{
+					// Server will prevent duplicates and return existing id if present
+					const out = await api('/api/create','POST',payload);
+					if (out && out.existing) {
+						dupEl.style.display = 'block';
+						setTimeout(()=> dupEl.style.display='none', 2500);
+					}
+					location.href = out.view;
+				}catch(err){
+					const msg = err && err.message ? err.message : 'Failed to create stream';
+					alert(msg);
+				}
+			});
+
+			urlEl.addEventListener('input', ()=>{
+				const u = urlEl.value.trim();
+				const dup = u && exists(u);
+				createBtn.textContent = dup ? 'Open existing' : 'Create';
+				dupEl.style.display = dup ? 'block' : 'none';
+				createBtn.disabled = false; // allow creating (server returns existing)
+			});
+			// Load list
+			(async()=>{
+				try{
+					const data = await api('/api/list');
+					existingList = data.list || [];
+					const el = document.getElementById('list');
+					function render(){
+						const rows = existingList;
+						el.innerHTML = '';
+						rows.forEach(item=>{
+							const div = document.createElement('div'); div.className='card';
+							const header = document.createElement('div'); header.style.display='flex'; header.style.justifyContent='space-between'; header.style.alignItems='center';
+							const a = document.createElement('a'); a.href = '/view/'+item.id; a.textContent = 'Open viewer';
+							const tools = document.createElement('div'); tools.style.display='flex'; tools.style.gap='12px';
+							const copy = document.createElement('a'); copy.href='#'; copy.textContent='Copy link'; copy.onclick=(e)=>{ e.preventDefault(); navigator.clipboard.writeText(location.origin+'/view/'+item.id).catch(()=>{}); };
+							const del = document.createElement('a'); del.href='#'; del.style.color='var(--danger)'; del.textContent='Delete'; del.onclick = async (e)=>{
+								e.preventDefault();
+								const sure = confirm('Delete this stream?');
+								if (!sure) return;
+								try {
+									await fetch('/api/delete/'+item.id, { method:'POST' });
+									existingList = existingList.filter(rec => rec.id !== item.id);
+									render();
+								} catch {}
+							};
+							tools.appendChild(copy);
+							tools.appendChild(del);
+							header.appendChild(a); header.appendChild(tools);
+							const u = document.createElement('div'); u.className='url'; u.textContent = item.url;
+							div.appendChild(header); div.appendChild(u); el.appendChild(div);
+						});
+					}
+					render();
+				}catch{}
+			})();
+			return;
+		}
+
+		// Viewer
+		document.documentElement.classList.add('view');
+		document.body.classList.add('view');
+		document.getElementById('bar').style.display='none';
+		const id = path.split('/').pop();
+		const stage = document.getElementById('stage');
+		const canvas = document.getElementById('canvas');
+		const ctx = canvas.getContext('2d');
+		const overlay = document.getElementById('overlay');
+		stage.style.display='block';
+
+		function fitCanvas(){
+			const r = stage.getBoundingClientRect();
+			const dpr = window.devicePixelRatio || 1;
+			canvas.width = Math.max(1, Math.floor(r.width * dpr));
+			canvas.height = Math.max(1, Math.floor(r.height * dpr));
+			canvas.style.width = '100%';
+			canvas.style.height = '100%';
+			// notify server of desired size in physical pixels
+			api('/api/resize/'+id, 'POST', { width: canvas.width, height: canvas.height }).catch(()=>{});
+		}
+
+		window.addEventListener('resize', fitCanvas);
+		fitCanvas();
+		if (document.fullscreenEnabled) stage.addEventListener('dblclick', ()=> stage.requestFullscreen());
+
+		// Start WebSocket transport
+		(function startWS(){
+			let ws;
+			function conn(){
+				const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
+				ws = new WebSocket(proto + '://' + location.host + '/ws/' + id);
+				ws.binaryType = 'arraybuffer';
+				ws.onopen = () => { try { fitCanvas(); } catch {} };
+				ws.onmessage = async (ev)=>{
+					if (typeof ev.data === 'string') return; // ignore JSON
+					try {
+						const blob = new Blob([ev.data], { type:'image/jpeg' });
+						const bmp = await createImageBitmap(blob);
+						ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+					} catch {}
+				};
+				ws.onclose = ()=>{ setTimeout(conn, 1200); };
+			}
+			conn();
+		})();
+
+		// Fullscreen helper
+		function goFull(){ if (document.fullscreenElement) return; stage.requestFullscreen?.(); }
+
+		// Input capture: normalize to 0..1 for server; server maps to pixel coords
+		function pos(ev){ const r = stage.getBoundingClientRect(); const x=(ev.clientX-r.left)/r.width; const y=(ev.clientY-r.top)/r.height; return {x,y}; }
+		function send(type, extra){ const body = { type, ...(extra||{}) }; return api('/api/input/'+id,'POST',body).catch(()=>{}); }
+
+		overlay.addEventListener('mousedown', (e)=>{ overlay.focus(); goFull(); const p=pos(e); send('mouseDown', { x:p.x, y:p.y, button:(e.button===2?'right': e.button===1?'middle':'left') }); });
+		overlay.addEventListener('mouseup', (e)=>{ const p=pos(e); send('mouseUp', { x:p.x, y:p.y, button:(e.button===2?'right': e.button===1?'middle':'left') }); });
+		overlay.addEventListener('mousemove', (e)=>{ const p=pos(e); send('mouseMove', { x:p.x, y:p.y }); });
+		overlay.addEventListener('wheel', (e)=>{ const p=pos(e); send('mouseWheel', { x:p.x, y:p.y, deltaX:e.deltaX, deltaY:e.deltaY }); });
+		overlay.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') { try{ document.exitFullscreen?.(); }catch{} } send('keyDown', { key:e.key, keyCode:e.key }); });
+		overlay.addEventListener('keyup', (e)=>{ send('keyUp', { key:e.key, keyCode:e.key }); });
+		overlay.addEventListener('keypress', (e)=>{ send('char', { key:e.key, keyCode:e.key }); });
+
+		overlay.addEventListener('contextmenu', (e)=> e.preventDefault());
+		overlay.addEventListener('dragstart', (e)=> e.preventDefault());
+
+		// Focus overlay for keyboard
+		overlay.focus();
+	})();
+	</script>
+</body>
+</html>
+

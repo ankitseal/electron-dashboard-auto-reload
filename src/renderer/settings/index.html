@@ -7,34 +7,39 @@
   <title>Settings</title>
   <style>
     :root {
-      --bg: #f5f7fa;
+      --bg: #f1f5f9;
       --bg-alt: #ffffff;
-      --border: #dce2eb;
-      --border-strong: #c3ccd7;
-      --text: #1f2933;
-      --text-soft: #5a6b7b;
-      --accent: #2563eb;
-      --accent-hover: #1d4ed8;
-      --danger: #b91c1c;
+      --border: #b8c5d6;
+      --border-strong: #7e8ea3;
+      --text: #0b1725;
+      --text-soft: #1c2f44;
+      --accent: #115e59;
+      --accent-hover: #0f4c46;
+      --accent-contrast: #ffffff;
+      --danger: #8b1d2c;
+      --danger-contrast: #ffffff;
       --radius: 10px;
-      --focus: 0 0 0 3px rgba(37,99,235,0.35);
+      --focus: 0 0 0 3px rgba(17,94,89,0.35);
       --shadow-sm: 0 1px 2px rgba(0,0,0,0.08);
       --shadow: 0 4px 12px rgba(0,0,0,0.08);
-      --gradient: linear-gradient(92deg,#2563eb,#4f46e5 55%, #9333ea);
+      --gradient: linear-gradient(92deg,#0f4c81,#0e3a5a 55%, #082135);
     }
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg: #111827;
-        --bg-alt: #1f2937;
-        --border: #2d3a4a;
-        --border-strong: #435467;
-        --text: #f3f4f6;
-        --text-soft: #9ca3af;
-        --accent: #3b82f6;
-        --accent-hover: #1d4ed8;
-        --danger: #f87171;
-        --gradient: linear-gradient(92deg,#3b82f6,#6366f1 55%, #8b5cf6);
+        --bg: #0b1220;
+        --bg-alt: #131c2e;
+        --border: #1f2a3c;
+        --border-strong: #2c3b53;
+        --text: #f8fafc;
+        --text-soft: #e2e8f0;
+        --accent: #5eead4;
+        --accent-hover: #50d6bf;
+        --accent-contrast: #0b1220;
+        --danger: #fca5a5;
+        --danger-contrast: #0b1220;
+        --gradient: linear-gradient(92deg,#0b3a3d,#0a2d43 55%, #061a2b);
         --shadow: 0 4px 16px rgba(0,0,0,0.55);
+        --focus: 0 0 0 3px rgba(94,234,212,0.35);
       }
     }
     * { box-sizing: border-box; }
@@ -119,9 +124,9 @@
       opacity:1;
     }
     .pwd { display:flex; gap:8px; align-items:center; }
-    .pwd button { flex:0 0 auto; background: var(--accent); color:#fff; border:none; padding:8px 10px; border-radius:8px; cursor:pointer; font-size:14px; line-height:1; display:flex; align-items:center; justify-content:center; }
+    .pwd button { flex:0 0 auto; background: var(--accent); color: var(--accent-contrast); border:none; padding:8px 10px; border-radius:8px; cursor:pointer; font-size:14px; line-height:1; display:flex; align-items:center; justify-content:center; }
     .pwd button:hover { background: var(--accent-hover); }
-    .help { font-weight:600; color: var(--accent); cursor:help; display:inline-flex; align-items:center; justify-content:center; margin-left:6px; border:1px solid var(--accent); background: rgba(37,99,235,0.07); border-radius:50%; width:18px; height:18px; line-height:16px; text-align:center; font-size:11px; }
+    .help { font-weight:600; color: var(--accent); cursor:help; display:inline-flex; align-items:center; justify-content:center; margin-left:6px; border:1px solid var(--accent); background: rgba(17,94,89,0.12); border-radius:50%; width:18px; height:18px; line-height:16px; text-align:center; font-size:11px; }
     .helptext { color: var(--text-soft); font-size:12px; line-height:1.4; margin-top:6px; }
     .status { margin-top:8px; min-height:1.2em; font-size:13px; font-weight:500; color: var(--accent); transition: opacity .3s; }
     .status.error { color: var(--danger); }
@@ -129,13 +134,13 @@
     #totpRing { width:28px; height:28px; border-radius:50%; background: conic-gradient(var(--accent) var(--deg,0deg), #e0e0e0 0deg); transition: background .2s linear; border:2px solid var(--border); box-shadow: inset 0 0 0 2px var(--bg-alt); }
     #twoFASetup { margin-top:8px; }
     #twoFARegistered { display:none; align-items:center; gap:10px; }
-    #twoFARegistered button, #twoFARegister { background: var(--accent); color:#fff; border:none; padding:6px 14px; font-size:13px; border-radius:8px; cursor:pointer; font-weight:500; }
+    #twoFARegistered button, #twoFARegister { background: var(--accent); color: var(--accent-contrast); border:none; padding:6px 14px; font-size:13px; border-radius:8px; cursor:pointer; font-weight:500; }
     #twoFARegistered button:hover, #twoFARegister:hover { background: var(--accent-hover); }
-    #twoFARemove { background: var(--danger); }
+    #twoFARemove { background: var(--danger); color: var(--danger-contrast); }
     #twoFARemove:hover { filter: brightness(.9); }
     #preview { background: linear-gradient(135deg,var(--bg-alt),rgba(255,255,255,0.6)); border:1px solid var(--border); padding:10px 12px; border-radius:8px; box-shadow: inset 0 1px 0 rgba(255,255,255,0.25), 0 1px 1px rgba(0,0,0,0.05); }
     #footerNote { max-width:980px; margin:0 auto 32px; padding:0 28px; font-size:12px; color: var(--text-soft); text-align:right; }
-    .toast { position:fixed; bottom:18px; right:20px; background: var(--accent); color:#fff; padding:10px 14px; border-radius:8px; font-size:13px; font-weight:500; box-shadow: var(--shadow); opacity:0; transform: translateY(6px); pointer-events:none; transition: opacity .28s, transform .28s; }
+    .toast { position:fixed; bottom:18px; right:20px; background: var(--accent); color: var(--accent-contrast); padding:10px 14px; border-radius:8px; font-size:13px; font-weight:500; box-shadow: var(--shadow); opacity:0; transform: translateY(6px); pointer-events:none; transition: opacity .28s, transform .28s; }
     .toast.show { opacity:1; transform: translateY(0); }
     a { color: var(--accent); text-decoration:none; }
     a:hover { text-decoration:underline; }
@@ -184,11 +189,36 @@
             <input id="loopPort" type="number" min="1" max="65535" step="1" placeholder="793" />
           </div>
         </div>
-        <label class="toggle" style="margin-top:12px;">
-          <span class="toggle-text">Minimize to tray while server runs</span>
-          <input id="minimizeToTray" type="checkbox" />
-        </label>
+        
   <div class="helptext">Security: When bound to 0.0.0.0, the endpoint is reachable from your LAN (http://&lt;lan-ip&gt;:793/). Use OS firewall rules or network segmentation as needed.</div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Reverse Proxy (Offscreen stream)</legend>
+      <label class="toggle">
+        <span class="toggle-text">
+          Enable reverse proxy streamer
+          <span class="help" title="Run a headless/offscreen renderer inside Electron and stream it back to your browser. Binds to all interfaces (0.0.0.0).">?</span>
+        </span>
+        <input id="rpEnabled" type="checkbox" />
+      </label>
+      <div id="rpFields" class="collapsible" data-open="false" style="margin-top:8px;">
+        <div class="row">
+          <div style="grid-column: 1 / -1;">
+            <label>Access URLs</label>
+            <div id="rpAddrs" class="helptext">—</div>
+          </div>
+          <div>
+            <label>Port</label>
+            <input id="rpPort" type="number" min="1" max="65535" step="1" placeholder="7993" />
+          </div>
+        </div>
+        <label class="toggle" style="margin-top:12px;">
+          <span class="toggle-text">Minimize to tray while reverse proxy runs</span>
+          <input id="rpMinimizeToTray" type="checkbox" />
+        </label>
+        <div class="helptext">Security: When bound to 0.0.0.0, the streamer is reachable from your LAN (http://&lt;lan-ip&gt;:7993/). Use firewall rules if needed.</div>
       </div>
     </fieldset>
 
@@ -388,6 +418,28 @@
   <script>
     const api = window.Settings;
     const NTP_DEFAULT_HOST = 'uk.pool.ntp.org';
+    // Track original server config so we can show 'Save and Restart' when needed
+    let initialCfgSnapshot = null;
+    function updateRestartButton() {
+      try {
+        const btn = document.getElementById('saveBtn');
+        if (!btn || !initialCfgSnapshot) return;
+        const loopEnabledNow = !!document.getElementById('loopEnabled')?.checked;
+        const loopPortNow = Number(document.getElementById('loopPort')?.value || 0) || 793;
+        const rpEnabledNow = !!document.getElementById('rpEnabled')?.checked;
+        const rpPortNow = Number(document.getElementById('rpPort')?.value || 0) || 7993;
+        const rpTrayNow = !!document.getElementById('rpMinimizeToTray')?.checked;
+        const needsRestart = (
+          loopEnabledNow !== !!initialCfgSnapshot.loopEnabled ||
+          Number(loopPortNow) !== Number(initialCfgSnapshot.loopPort) ||
+          rpEnabledNow !== !!initialCfgSnapshot.rpEnabled ||
+          Number(rpPortNow) !== Number(initialCfgSnapshot.rpPort) ||
+          rpTrayNow !== !!initialCfgSnapshot.rpMinimizeToTray
+        );
+        btn.textContent = needsRestart ? 'Save and Restart' : 'Save';
+        btn.title = needsRestart ? 'Save and restart the app to apply server changes' : 'Save settings (Ctrl+S)';
+      } catch {}
+    }
   function val(id){ return document.getElementById(id).value; }
     function sanitizeProxyHostValue(raw, portInput) {
       if (!raw) return '';
@@ -452,10 +504,11 @@
   setVal('proxyHost', cfg.proxyHost || '');
   setVal('proxyPort', Number.isFinite(Number(cfg.proxyPort)) && Number(cfg.proxyPort) > 0 ? Number(cfg.proxyPort) : '');
   setChk('proxyUseHttps', cfg.proxyUseHttps === undefined ? true : !!cfg.proxyUseHttps);
-  // Loopback
-  setChk('loopEnabled', !!cfg.loopback?.enabled);
+  // Remote setup
+  const remote = cfg.remoteSetup || cfg.remotesetup || cfg.loopback || {};
+  setChk('loopEnabled', !!remote.enabled);
   const lf = document.getElementById('loopFields');
-  if (lf) lf.dataset.open = cfg.loopback?.enabled ? 'true' : 'false';
+  if (lf) lf.dataset.open = remote.enabled ? 'true' : 'false';
   const lan = document.getElementById('serverLan');
   const port = (cfg.serverInfo?.port || 793);
   const addrsRaw = Array.isArray(cfg.serverInfo?.addresses) ? cfg.serverInfo.addresses : [];
@@ -471,8 +524,37 @@
     }
   }
   const loopPortInput = document.getElementById('loopPort');
-  if (loopPortInput) loopPortInput.value = Number.isFinite(Number(cfg.loopback?.port)) && Number(cfg.loopback.port) > 0 ? Number(cfg.loopback.port) : 793;
-  setChk('minimizeToTray', !!cfg.loopback?.minimizeToTray);
+  if (loopPortInput) loopPortInput.value = Number.isFinite(Number(remote?.port)) && Number(remote.port) > 0 ? Number(remote.port) : 793;
+  
+  // Reverse proxy
+  setChk('rpEnabled', !!cfg.reverseProxy?.enabled);
+  const rpWrap = document.getElementById('rpFields');
+  if (rpWrap) rpWrap.dataset.open = cfg.reverseProxy?.enabled ? 'true' : 'false';
+  const rpAddrs = document.getElementById('rpAddrs');
+  const rpPort = (cfg.serverInfo?.reverseProxy?.port || cfg.reverseProxy?.port || 7993);
+  const rpAddrList = Array.isArray(cfg.serverInfo?.reverseProxy?.addresses) ? cfg.serverInfo.reverseProxy.addresses : [];
+  const rpUnique = Array.from(new Set(rpAddrList.filter(Boolean)));
+  if (rpAddrs) {
+    if (rpUnique.length) {
+      rpAddrs.innerHTML = '<div class="addrList">' + rpUnique.map(ip => {
+        const u = 'http://' + ip + ':' + rpPort + '/';
+        return '<button type="button" class="addrCopy" data-url="'+u+'">'+u+'</button>';
+      }).join('') + '</div>';
+    } else {
+      rpAddrs.textContent = '—';
+    }
+  }
+  const rpPortInput = document.getElementById('rpPort');
+  if (rpPortInput) rpPortInput.value = Number.isFinite(Number(cfg.reverseProxy?.port)) && Number(cfg.reverseProxy.port) > 0 ? Number(cfg.reverseProxy.port) : 7993;
+  setChk('rpMinimizeToTray', !!cfg.reverseProxy?.minimizeToTray);
+  // Capture snapshot (only server-related bits we care for restart)
+  initialCfgSnapshot = {
+    loopEnabled: !!remote.enabled,
+    loopPort: Number(remote?.port || 793),
+    rpEnabled: !!cfg.reverseProxy?.enabled,
+    rpPort: Number(cfg.reverseProxy?.port || 7993),
+    rpMinimizeToTray: !!cfg.reverseProxy?.minimizeToTray
+  };
   setChk('twEnabled', cfg.timeWindow?.enabled);
   // Default twStart to 12:00 when enabled but missing
   const startVal = (cfg.timeWindow?.enabled && (!cfg.timeWindow?.start || !String(cfg.timeWindow.start).trim())) ? '12:00' : cfg.timeWindow?.start;
@@ -495,6 +577,8 @@
   updateProxyInputs();
   scheduleNtpPreferenceUpdate();
   scheduleProxyPreferenceUpdate();
+  // Update button label according to current values
+  updateRestartButton();
     }
 
   document.getElementById('cfg').addEventListener('submit', async (e) => {
@@ -537,18 +621,29 @@
   proxyPort: Number(document.getElementById('proxyPort').value),
   proxyUseHttps: document.getElementById('proxyUseHttps') ? document.getElementById('proxyUseHttps').checked : false
       ,
-  loopback: {
+  remoteSetup: {
     enabled: document.getElementById('loopEnabled').checked,
-    port: Number(document.getElementById('loopPort').value) || 793,
-    minimizeToTray: document.getElementById('minimizeToTray').checked
+    port: Number(document.getElementById('loopPort').value) || 793
+  },
+  reverseProxy: {
+    enabled: document.getElementById('rpEnabled').checked,
+    port: Number(document.getElementById('rpPort').value) || 7993,
+    minimizeToTray: document.getElementById('rpMinimizeToTray').checked
   }
       };
       const st = document.getElementById('status');
       try {
         const res = await api.saveConfig(payload);
         if (res && res.ok) { st.textContent = 'Saved'; st.classList.remove('error');
-          if (res.loopbackStatus && res.loopbackStatus.error) {
-            showToast('Server error: ' + res.loopbackStatus.error, 'error');
+          if (res.restartRequired) {
+            showToast('Changes require app restart. Restarting…');
+            try { if (window.Settings && typeof window.Settings.restartApp === 'function') { await window.Settings.restartApp(); } } catch {}
+            return; // app will relaunch
+          }
+          if (res.remoteSetupStatus && res.remoteSetupStatus.error) {
+            showToast('Server error: ' + res.remoteSetupStatus.error, 'error');
+          } else if (res.reverseProxyStatus && res.reverseProxyStatus.error) {
+            showToast('Reverse proxy error: ' + res.reverseProxyStatus.error, 'error');
           } else {
             showToast('Settings saved');
           }
@@ -571,7 +666,34 @@
               }
             }
             const loopPortInput = document.getElementById('loopPort');
-            if (loopPortInput) loopPortInput.value = Number.isFinite(Number(cfg2.loopback?.port)) && Number(cfg2.loopback.port) > 0 ? Number(cfg2.loopback.port) : 793;
+            const remote2 = cfg2.remoteSetup || cfg2.remotesetup || cfg2.loopback || {};
+            if (loopPortInput) loopPortInput.value = Number.isFinite(Number(remote2?.port)) && Number(remote2.port) > 0 ? Number(remote2.port) : 793;
+            // Update reverse proxy addresses
+            const rpAddrs2 = document.getElementById('rpAddrs');
+            const rpPort2 = (cfg2.serverInfo?.reverseProxy?.port || cfg2.reverseProxy?.port || 7993);
+            const rpAddrList2 = Array.isArray(cfg2.serverInfo?.reverseProxy?.addresses) ? cfg2.serverInfo.reverseProxy.addresses : [];
+            const rpUnique2 = Array.from(new Set(rpAddrList2.filter(Boolean)));
+            if (rpAddrs2) {
+              if (rpUnique2.length) {
+                rpAddrs2.innerHTML = '<div class="addrList">' + rpUnique2.map(ip => {
+                  const u = 'http://' + ip + ':' + rpPort2 + '/';
+                  return '<button type="button" class="addrCopy" data-url="'+u+'">'+u+'</button>';
+                }).join('') + '</div>';
+              } else {
+                rpAddrs2.textContent = '—';
+              }
+            }
+            const rpPortInput2 = document.getElementById('rpPort');
+            if (rpPortInput2) rpPortInput2.value = Number.isFinite(Number(cfg2.reverseProxy?.port)) && Number(cfg2.reverseProxy.port) > 0 ? Number(cfg2.reverseProxy.port) : 7993;
+            // Refresh snapshot and button when no restart occurred
+            initialCfgSnapshot = {
+              loopEnabled: !!remote2.enabled,
+              loopPort: Number(remote2?.port || 793),
+              rpEnabled: !!cfg2.reverseProxy?.enabled,
+              rpPort: Number(cfg2.reverseProxy?.port || 7993),
+              rpMinimizeToTray: !!cfg2.reverseProxy?.minimizeToTray
+            };
+            updateRestartButton();
           } catch {}
         }
         else { st.textContent = 'Error'; st.classList.add('error'); showToast('Save failed','error'); }
@@ -829,14 +951,37 @@
   const _twDurEl = document.getElementById('twDuration');
   if (_twDurEl) _twDurEl.addEventListener('change', () => { updatePreview(); updateRule(); });
 
-    // Loopback UI
+    // Remote setup UI
     function updateLoopInputs(){
       const on = document.getElementById('loopEnabled').checked;
       const wrap = document.getElementById('loopFields');
       if (wrap) wrap.dataset.open = on ? 'true' : 'false';
     }
-    const loopToggle = document.getElementById('loopEnabled');
-    if (loopToggle) loopToggle.addEventListener('change', updateLoopInputs);
+  const loopToggle = document.getElementById('loopEnabled');
+  if (loopToggle) loopToggle.addEventListener('change', () => { updateLoopInputs(); updateRestartButton(); });
+
+    // Reverse proxy UI
+    function updateRpInputs(){
+      const on = document.getElementById('rpEnabled').checked;
+      const wrap = document.getElementById('rpFields');
+      if (wrap) wrap.dataset.open = on ? 'true' : 'false';
+    }
+    const rpToggle = document.getElementById('rpEnabled');
+    if (rpToggle) rpToggle.addEventListener('change', () => { updateRpInputs(); updateRestartButton(); });
+  const rpTrayToggle = document.getElementById('rpMinimizeToTray');
+  if (rpTrayToggle) rpTrayToggle.addEventListener('change', updateRestartButton);
+
+    // Monitor port fields to decide if restart is needed
+    const loopPortEl = document.getElementById('loopPort');
+    if (loopPortEl) {
+      loopPortEl.addEventListener('input', updateRestartButton);
+      loopPortEl.addEventListener('blur', updateRestartButton);
+    }
+    const rpPortEl = document.getElementById('rpPort');
+    if (rpPortEl) {
+      rpPortEl.addEventListener('input', updateRestartButton);
+      rpPortEl.addEventListener('blur', updateRestartButton);
+    }
 
     // Link tab timeout to navigate-back; 0 disables navigate back
     function updateNavBackInputs() {
@@ -986,6 +1131,7 @@
       const t = document.getElementById('toastMsg');
       t.textContent = msg;
       t.style.background = (type==='error') ? 'var(--danger)' : 'var(--accent)';
+      t.style.color = (type==='error') ? 'var(--danger-contrast)' : 'var(--accent-contrast)';
       t.classList.add('show');
       clearTimeout(t.__hide);
       t.__hide = setTimeout(()=>{ t.classList.remove('show'); }, 2200);

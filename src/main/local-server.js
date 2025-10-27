@@ -130,7 +130,7 @@ function startLocalServer({ host = '0.0.0.0', port = 793, onOpen, onGetConfig, o
   return new Promise((resolve, reject) => {
     server.once('error', (e) => reject(e));
     server.listen({ host, port }, () => {
-      try { console.log(`[loopback] listening on ${host}:${port}`); } catch {}
+      try { console.log(`[remote-setup] listening on ${host}:${port}`); } catch {}
       resolve({ close: () => new Promise((res) => {
         try {
           server.close(() => res());
