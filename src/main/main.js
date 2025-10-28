@@ -1474,8 +1474,8 @@ async function bootstrap() {
     } catch {}
   });
 
-  // Menu with a toggle checkbox for auto-refresh
-  const menu = Menu.buildFromTemplate([
+  // Menu with a toggle checkbox for auto-refresh plus window controls
+  const menuTemplate = [
     {
       label: 'Settings',
       submenu: [
@@ -1540,6 +1540,42 @@ async function bootstrap() {
       ]
     },
     {
+      label: 'Window',
+      submenu: [
+        {
+          id: 'window-minimize',
+          label: 'Minimize',
+          accelerator: 'Ctrl+M',
+          click: () => {
+            try { win.minimize(); } catch {}
+          }
+        },
+        {
+          id: 'window-toggle-maximize',
+          label: 'Maximize',
+          accelerator: 'Ctrl+Shift+M',
+          click: () => {
+            try {
+              if (win.isMaximized()) {
+                win.unmaximize();
+              } else {
+                win.maximize();
+              }
+            } catch {}
+          }
+        },
+        { type: 'separator' },
+        {
+          id: 'window-close',
+          label: 'Close',
+          accelerator: 'Alt+F4',
+          click: () => {
+            try { win.close(); } catch {}
+          }
+        }
+      ]
+    },
+    {
       label: 'View',
       submenu: [
         { role: 'reload' },
@@ -1553,8 +1589,24 @@ async function bootstrap() {
       ]
     },
     { label: 'Quit', role: 'quit' }
-  ]);
+  ];
+  const menu = Menu.buildFromTemplate(menuTemplate);
+  const toggleMaximizeItem = menu.getMenuItemById('window-toggle-maximize');
+  const syncMaximizeMenuLabel = () => {
+    try {
+      if (!toggleMaximizeItem) return;
+      const maximized = win.isMaximized();
+      toggleMaximizeItem.label = maximized ? 'Restore Down' : 'Maximize';
+    } catch {}
+  };
+  syncMaximizeMenuLabel();
   Menu.setApplicationMenu(menu);
+  const refreshMenu = () => {
+    syncMaximizeMenuLabel();
+    Menu.setApplicationMenu(menu);
+  };
+  win.on('maximize', refreshMenu);
+  win.on('unmaximize', refreshMenu);
 
   // Start remote setup server if enabled, or if config is missing (for remote setup)
   try {
@@ -1608,7 +1660,16 @@ async function bootstrap() {
             { label: 'Show', click: () => { try { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } catch {} } },
             { label: 'Settings…', click: () => { try { openSettings(); } catch {} } },
             { type: 'separator' },
-            { label: 'Quit', click: () => { try { if (tray) { tray.destroy(); tray = null; } } catch {}; app.quit(); } }
+            { label: 'Quit', click: () => {
+              try {
+                if (tray) {
+                  tray.destroy();
+                }
+              } catch {}
+              try { tray = null; } catch {}
+              try { global.__tray = null; } catch {}
+              app.quit();
+            } }
           ]);
           tray.setContextMenu(contextMenu);
           tray.on('click', () => { try { if (win.isMinimized()) win.restore(); win.show(); win.focus(); } catch {} });
