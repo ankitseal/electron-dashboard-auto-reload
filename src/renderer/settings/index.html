@@ -304,6 +304,18 @@
     </fieldset>
 
     <fieldset>
+      <legend>Application</legend>
+      <label class="toggle">
+        <span class="toggle-text">
+          Launch at system startup
+          <span class="help" title="Start Dashboard Auto Reload automatically when the operating system boots.">?</span>
+        </span>
+        <input id="launchOnBoot" type="checkbox" />
+      </label>
+      <div class="helptext">Applies to the current user account on this device.</div>
+    </fieldset>
+
+    <fieldset>
       <legend>Rolling Window</legend>
       <label class="toggle">
         <span class="toggle-text">
@@ -565,6 +577,7 @@
   setChk('autoReloadEnabled', !!cfg.autoReloadEnabled);
   updateReloadInputs();
   setChk('navigateBackEnabled', !!cfg.navigateBackEnabled);
+  setChk('launchOnBoot', !!cfg.launchOnBoot);
   // 2FA state
   setChk('twoFAEnabled', !!twoFA.enabled);
   await update2FAUI(twoFA);
@@ -613,6 +626,7 @@
     timeWindow: { enabled: twOn, start: twStart || '12:00', duration: (document.getElementById('twDuration') ? document.getElementById('twDuration').value : '1d') },
   autoReloadEnabled: toggleOn,
   navigateBackEnabled: navBackOn,
+  launchOnBoot: document.getElementById('launchOnBoot').checked,
   tabTimeoutSec: tabTimeout,
   useSystemTime: document.getElementById('useSystemTime').checked,
   ntpServer: val('ntpServer').trim(),

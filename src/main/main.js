@@ -154,7 +154,8 @@ const DEFAULTS = {
   proxyHost: '',
   proxyPort: 0,
   proxyUseHttps: true,
-  proxyEnabled: false
+  proxyEnabled: false,
+  launchOnBoot: false
 };
 
 function loadConfig() {
@@ -347,6 +348,9 @@ function loadConfig() {
     port: Number.isFinite(Number(cfg.reverseProxy?.port)) ? Number(cfg.reverseProxy.port) : 7993,
     minimizeToTray: !!(cfg.reverseProxy && cfg.reverseProxy.minimizeToTray)
   };
+  const launchOnBoot = (cfg.launchOnBoot === undefined)
+    ? DEFAULTS.launchOnBoot
+    : !!cfg.launchOnBoot;
 
   return {
   hasUrl,
@@ -364,10 +368,11 @@ function loadConfig() {
   tabTimeoutSec,
       ntpServer: configuredNtpServer,
       useSystemTime,
-    proxyHost,
-    proxyPort,
+  proxyHost,
+  proxyPort,
   proxyUseHttps,
-    proxyEnabled,
+  proxyEnabled,
+  launchOnBoot,
     waitForCss: cfg.waitForCss ?? DEFAULTS.waitForCss,
   configPath: usedCfgPath,
   // 2FA persisted state: enabled flag and encrypted secret (if present)
@@ -557,6 +562,23 @@ async function bootstrap() {
     }
   }
   await configureProxy(cfg.proxyHost, cfg.proxyPort, cfg.proxyUseHttps, cfg.proxyEnabled);
+  function applyLaunchOnBoot(openAtLogin) {
+    try {
+      if (!app || typeof app.setLoginItemSettings !== 'function') return;
+      const settings = {
+        openAtLogin: !!openAtLogin,
+        path: process.execPath,
+        args: []
+      };
+      if (process.platform === 'darwin') {
+        settings.openAsHidden = !!openAtLogin;
+      }
+      app.setLoginItemSettings(settings);
+    } catch (err) {
+      console.error('[electron-auto-reload] Failed to update launch-on-boot preference:', err);
+    }
+  }
+  applyLaunchOnBoot(cfg.launchOnBoot);
 
   const win = new BrowserWindow({
     show: false,
@@ -670,6 +692,7 @@ async function bootstrap() {
   proxyEnabled: cfg.proxyEnabled,
   autoReloadEnabled: cfg.autoReloadEnabled,
   navigateBackEnabled: cfg.navigateBackEnabled,
+  launchOnBoot: !!cfg.launchOnBoot,
   tabTimeoutSec: cfg.tabTimeoutSec,
   // Remote setup summary for Settings UI (do not expose secrets)
   remoteSetup: (() => {
@@ -907,6 +930,9 @@ async function bootstrap() {
           ? incomingRemote.apiKey
           : ((typeof currentRemote.apiKey === 'string') ? currentRemote.apiKey : 'change-me')
       };
+  const nextLaunchOnBoot = (newCfg.launchOnBoot !== undefined)
+    ? !!newCfg.launchOnBoot
+    : !!cfg.launchOnBoot;
 
   const merged = {
         url: (typeof newCfg.url === 'string') ? newCfg.url : (cfg.hasUrl ? cfg.targetUrl : ''),
@@ -918,6 +944,7 @@ async function bootstrap() {
   timeWindow: nextTW,
         autoReloadEnabled: autoEnabled,
         navigateBackEnabled: navBack,
+    launchOnBoot: nextLaunchOnBoot,
     tabTimeoutSec: Number.isFinite(desiredTabTimeout) ? desiredTabTimeout : 600,
     ntpServer: nextNtpServer,
         useSystemTime: nextUseSystem,
@@ -1007,6 +1034,8 @@ async function bootstrap() {
   cfg.proxyPort = merged.proxyPort;
   cfg.proxyUseHttps = merged.proxyUseHttps;
   cfg.proxyEnabled = merged.proxyEnabled;
+  cfg.launchOnBoot = nextLaunchOnBoot;
+  applyLaunchOnBoot(cfg.launchOnBoot);
   // Determine if remote setup / reverse proxy enabled flags toggled (before mutating cfg)
   const remoteSetupToggledOnOff = (!!(cfg.remoteSetup || cfg.remotesetup || cfg.loopback)?.enabled) !== (!!merged.remoteSetup?.enabled);
   const reverseProxyToggledOnOff = (!!cfg.reverseProxy?.enabled) !== (!!merged.reverseProxy?.enabled);
